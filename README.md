@@ -68,10 +68,21 @@ The coding style used for RPC-MT can most briefly be described
 as Sun cstyle, but with certain changes.  They are: tabs instead of spaces;
 4 character indent, instead of 8.  No cuddling of braces.
 
+Compatability
+=============
+RPC-MT introduces one change to the interface.  When a worker thread is done
+handling a request, it must call `svc_return()`.  In practice, this has
+not caused a problem, because the Linux version of Sun RPC is not quite
+compatible with the Solaris version of Sun RPC, anyway.  So, it is necessary
+to do some feature testing, static ifs or #ifdefs, in order to write
+code that would work on Solaris and Linux.
+
 History
 =======
 RPC-MT was written in 2011, by Guy Shaw, under contract
 with Themis Computer, http://www.themis.com.
+
+It was based on eglibc-2.11.1/sunrpc.
 
 License
 =======
