@@ -1,0 +1,69 @@
+CC = @CC@
+
+GFLAGS = -g -ggdb -g3
+CFLAGS = $(GFLAGS) -Wall -pthread -fPIC -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC
+
+SRC_C = \
+    decode-addr.c \
+    decode-poll-events.c \
+    decode-inet-family.c \
+    decode-inet-endpoint.c \
+    decode-inet-peer.c \
+    decode-esym.c \
+    decode-errno.c \
+    decode-int.c \
+    util.c \
+    ###
+
+SRC_I = $(SRC_C:%.c=%.i)
+SRC_M = $(SRC_C:%.c=%.m)
+OBJ = $(SRC_C:%.c=%.o)
+
+.PHONY: all dev ifiles mfiles hfiles clean
+
+all: libdecode.so
+
+dev: libdecode.so ifiles mfiles hfiles
+
+decode-esym.c: decode-esym/decode-esym.c
+	cp --target-directory . --preserve decode-esym/decode-esym.c
+
+decode-esym/decode-esym.c:
+	( cd decode-esym && make )
+
+ifiles: $(SRC_I)
+%.i: %.c
+	$(CC) -E $(CFLAGS) $< -o $@
+
+mfiles: $(SRC_M)
+%.m: %.c
+	$(CC) -M $(CFLAGS) $< -o $@
+
+hfiles: $(SRC_C:%.c=%.H)
+%.H: %.c
+	$(CC) -H -c $(CFLAGS) $< >$@ 2>&1
+
+
+$(OBJ): decode.h
+
+libdecode.so: $(OBJ)
+	rm -f libdecode.so libdecode.so.1
+	$(CC) -shared -Wl,-soname,libdecode.so.1 -o libdecode.so.1.0.1 $(CFLAGS) $(SRC_C)
+	ln -s libdecode.so.1.0.1 libdecode.so.1
+	ln -s libdecode.so.1.0.1 libdecode.so
+	# scanelf -qT libdecode.so.1.0.1
+
+clean:
+	rm -f cscope.out cscope.in.out cscope.po.out tags
+	rm -f libdecode.so.1.0.1 libdecode.so.1 libdecode.so *.o *.i *.m *.H
+	rm -f decode-esym.c decode-esym-table.c
+
+distclean: clean
+	# Clean files created by autotools
+	rm -f Makefile config.status config.log configure.ac
+
+show:
+	echo SRC_C = $(SRC_C)
+	echo SRC_I = $(SRC_I)
+	echo SRC_M = $(SRC_M)
+	echo OBJ = $(OBJ)

@@ -1,0 +1,49 @@
+CC = @CC@
+
+GFLAGS = -g -ggdb -g3
+CFLAGS = $(GFLAGS) -Wall -pthread -fPIC -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC -D_RPC_THREAD_SAFE_
+
+SRC_C = svc_run.c svc.c svc_tcp.c svc_udp.c svc_debug.c util.c
+SRC_I = $(SRC_C:%.c=%.i)
+SRC_M = $(SRC_C:%.c=%.m)
+OBJ = $(SRC_C:%.c=%.o)
+
+.PHONY: all dev ifiles clean
+
+all: librpc.so
+
+dev: librpc.so ifiles mfiles
+
+ifiles: $(SRC_I)
+%.i: %.c
+	$(CC) -E $(CFLAGS) $< -o $@
+
+mfiles: $(SRC_M)
+%.m: %.c
+	$(CC) -M $(CFLAGS) $< -o $@
+
+hfiles: $(SRC_C:%.c=%.H)
+%.H: %.c
+	$(CC) -H -c $(CFLAGS) $< >$@ 2>&1
+
+
+$(OBJ): svc_mtxprt.h svc_debug.h
+
+librpc.so: $(OBJ)
+	rm -f librpc.so librpc.so.1
+	$(CC) -shared -Wl,-soname,librpc.so.1 -o librpc.so.1.0.1 $(CFLAGS) $(SRC_C)
+	ln -s librpc.so.1.0.1 librpc.so.1
+	ln -s librpc.so.1.0.1 librpc.so
+
+clean:
+	rm -f cscope.files cscope.out cscope.in.out cscope.po.out tags
+	rm -f librpc.so.1.0.1 librpc.so.1 librpc.so *.o *.i *.m
+
+distclean: clean
+	rm -f Makefile config.status config.log configure.ac
+
+show:
+	echo SRC_C = $(SRC_C)
+	echo SRC_I = $(SRC_I)
+	echo SRC_M = $(SRC_M)
+	echo OBJ = $(OBJ)

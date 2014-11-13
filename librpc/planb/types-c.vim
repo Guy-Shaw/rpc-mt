@@ -1,0 +1,18 @@
+silent! syn clear CTagsFunction CTagsEnumeratorName CTagsDefinedName CTagsEnumerationValue CTagsFile CTagsClass CTagsNamespace CTagsLocalVariable CTagsMember CTagsConstant CTagsGlobalVariable CTagsType CTagsUnion CTagsStructure CTagsFunction CTagsExtern
+syntax keyword CTagsStructure svc_callout tcp_conn tcp_rendezvous
+syntax keyword CTagsMember recvsize sc_dispatch sc_mapped sc_next sc_prog sc_vers sendsize strm_stat verf_body x_id xdrs
+syntax keyword CTagsGlobalVariable svc_head xports
+syntax keyword CTagsConstant svctcp_op svctcp_rendezvous_op
+syntax keyword CTagsFunction __rpc_thread_svc_cleanup fbt_svc_find fbt_svc_is_mapped fbt_svc_register fbt_xprt_register fbt_xprt_unregister guard_malloc makefd_xprt readtcp rendezvous_request rendezvous_stat svc_die svc_exit svc_getreq svc_getreq_common svc_getreq_poll svc_getreqset svc_run_thread svc_sendreply svc_unregister svcerr_auth svcerr_decode svcerr_noproc svcerr_noprog svcerr_progvers svcerr_systemerr svcerr_weakauth svcfd_create svctcp_create svctcp_destroy svctcp_freeargs svctcp_getargs
+syntax keyword CTagsFunction svctcp_recv svctcp_rendezvous_abort svctcp_reply svctcp_stat writetcp xprt_register
+syntax keyword CTagsDefinedName NULL_SVC RQCRED_SIZE _RPC_DEBUG_H
+syntax keyword CTagsLocalVariable addr bit cd cnt cred_area dtsize fds_found high_vers i ixports j last_max_pollfd len low_vers madesock mask maskp max_pollfd mem milliseconds msg my_pollfd new_pollfd new_svc_pollfd p pollfd prev prog_found r readfds rply s setsize sock stat svcp why xdrs xprt
+
+
+if exists('b:hlrainbow') && !exists('g:nohlrainbow')
+	syn cluster cBracketGroup add=CTagsStructure,CTagsMember,CTagsGlobalVariable,CTagsConstant,CTagsFunction,CTagsDefinedName,CTagsLocalVariable,CTagsLocalVariable
+	syn cluster cCppBracketGroup add=CTagsStructure,CTagsMember,CTagsGlobalVariable,CTagsConstant,CTagsFunction,CTagsDefinedName,CTagsLocalVariable,CTagsLocalVariable
+	syn cluster cCurlyGroup add=CTagsStructure,CTagsMember,CTagsGlobalVariable,CTagsConstant,CTagsFunction,CTagsDefinedName,CTagsLocalVariable,CTagsLocalVariable
+	syn cluster cParenGroup add=CTagsStructure,CTagsMember,CTagsGlobalVariable,CTagsConstant,CTagsFunction,CTagsDefinedName,CTagsLocalVariable,CTagsLocalVariable
+	syn cluster cCppParenGroup add=CTagsStructure,CTagsMember,CTagsGlobalVariable,CTagsConstant,CTagsFunction,CTagsDefinedName,CTagsLocalVariable,CTagsLocalVariable
+endif

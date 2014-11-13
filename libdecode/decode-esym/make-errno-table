@@ -1,0 +1,352 @@
+#! /usr/bin/perl
+
+=pod
+
+=begin description
+
+Gather up the definitions of a class of preprocessor symbols
+and create a lookup table that is suitable for decoding all
+legal numeric values.
+
+Example:
+  All symbols of the form, /\AE[A-Z0-9]+\z/, from all #define
+  directives reachable from @file{/usr/include/errno.h}.
+
+  Can be used to create a decode function for values of
+  @var{errno}.  Sort of like strerror(), but decodes to the
+  symbol, rather than the description.
+
+  make-table --sym-regex '\AE[A-Z0-9]+\z' /usr/include/errno.h
+
+Example:
+  All symbols of the form, /\AAF_[A-Z][A-Z0-9]*\z/,
+  from all #define directives reachable from
+  @file{/usr/include/sys/socket.h}.
+
+  make-table --sym-regex '\AAF_[A-Z][A-Z0-9]*\z' /usr/include/sys/socket.h
+
+=end description
+
+=cut
+
+require 5.0;
+use strict;
+use warnings;
+use Carp;
+use diagnostics;
+use Getopt::Long;
+use File::Spec::Functions;
+
+my $debug    = 0;
+my $verbose  = 0;
+my $keep_tmp = 0;
+
+my $sym_pattern = '[A-Za-z_][A-Za-z0-9_]*';
+my $table_var = '';
+my $size_var  = '';
+
+my @options = (
+    'debug'       => \$debug,
+    'verbose'     => \$verbose,
+    'keep-tmp'    => \$keep_tmp,
+    'table=s'     => \$table_var,
+    'size=s'      => \$size_var,
+    'sym-regex=s' => \$sym_pattern,
+);
+
+my %Tmp = ();
+my %builtins;
+
+#:subroutines:#
+
+sub eprint {
+    print {*STDERR} @_;
+}
+
+sub eprintf {
+    printf {*STDERR} @_;
+}
+
+sub dprint {
+    print {*STDERR} @_ if ($debug);
+}
+
+sub dprintf {
+    printf {*STDERR} @_ if ($debug);
+}
+
+# Remove all registered temp files.
+# Do not bother reporting any errors.
+# After all, we are probably on our way out,
+# and maybe due an error, already,
+# and would not know what to do, anyway.
+#
+sub cleanup_tmp {
+    unlink keys %Tmp;
+}
+
+sub fatal {
+    if (!$debug && !$keep_tmp) {
+        cleanup_tmp();
+    }
+    exit $_[0];
+}
+
+# Make dictionary of #defined symbols from stream.
+#
+sub make_dictionary_from_cpp_defines {
+    my ($dict_ref, $src_fh) = @_;
+
+    while (<$src_fh>) {
+        chomp;
+        s{\r\z}{}smx;
+        s{\s+\z}{}smx;
+
+        if (m{\A\#define\s+([_A-Za-z][_A-Za-z0-9]*)\s+(\S+)(?: \s|\z)}msx) {
+            my $definiens = $1;
+            my $definiendum = $2;
+            ${$dict_ref}{$definiens} = $definiendum;
+        }
+    }
+    close $src_fh;
+    return 0;
+}
+
+# Pass 1.
+#
+# Gather up all the #define directives, and create C program
+# that will print the fully evaluated definitions.
+#
+sub gather_definitions {
+    my ($src_fh, $tmp_dst_fname) = @_;
+    my $tmp_fh;
+    my $sym_regex;
+    my @entries;
+    my $ent_ref;
+    my $allow;
+
+    $Tmp{$tmp_dst_fname} = 1;
+    if (!open($tmp_fh, '>', $tmp_dst_fname)) {
+        eprint "open('>', '${tmp_dst_fname}') failed; $!\n";
+        return $!;
+    }
+
+    $sym_regex = $sym_pattern;
+    eprint "sym_regex = /${sym_regex}/\n";
+    $sym_regex = qr/$sym_regex/o;
+    print {$tmp_fh}
+        "#include <stdio.h>\n",
+        "\n",
+        ;
+
+    while (<$src_fh>) {
+        chomp;
+        s{\r\z}{}smx;
+        s{\s+\z}{}smx;
+
+        $allow = 0;
+        # Pass through all C preprocessor directives,
+        # except definitions that came from builtin.
+        #
+        if (m{\A\#\s*[a-z]+\s+}msx) {
+            $allow = 1;
+        }
+        if (m{\A\#define\s+([_A-Za-z][_A-Za-z0-9]*)\s+(\S+)(?: \s|\z)}msx) {
+            my $definiens = $1;
+            my $definiendum = $2;
+            if (defined($builtins{$definiens})) {
+                $allow = 0;
+            }
+            if ($definiens =~ m{$sym_regex}msx) {
+                push(@entries, [ $definiendum, "${definiens}" ]);
+            }
+        }
+
+        if ($allow) {
+            print {$tmp_fh} $_, "\n";
+        }
+    }
+    close $src_fh;
+
+    print {$tmp_fh}
+        "\n",
+        "int\n",
+        "main(int argc, char * const *argv)\n",
+        "{\n",
+        ;
+
+    for $ent_ref (@entries) {
+        my ($value, $symbol) = @$ent_ref;
+        print {$tmp_fh}  qq[    printf("%d %s\\n", $value, "$symbol");], "\n";
+    }
+
+    print {$tmp_fh}
+        "}\n",
+        ;
+    close $tmp_fh;
+    return 0;
+}
+
+sub eval_definitions {
+    my ($src_fh) = @_;
+    my @table;
+    my $warn_multiple;
+    my $err;
+
+    @table = ();
+    $warn_multiple = 0;
+    $err = 0;
+    while (<$src_fh>) {
+        my $value;
+        my $symbol;
+        my $idx;
+
+        chomp;
+        s{\r\z}{}msx;
+        ($value, $symbol) = split;
+        if ($value !~ m{\A\d+\z}msx) {
+            eprint "Value is not numeric, '${value}'\n";
+            $err = 1;
+        }
+        $idx = $value + 0;
+        my $old_sym = $table[$idx];
+        if (defined($old_sym)) {
+            eprint "Multiple symbols for errno ${idx}:\n";
+            eprint "    ${old_sym}, ${symbol}\n";
+            eprint "    Only '${old_sym}' will be used.\n";
+            $warn_multiple = 1;
+        }
+        else {
+            $table[$idx] = $symbol;
+        }
+    }
+    close $src_fh;
+
+    print "static char *${table_var}[] = {\n";
+    my $size = scalar(@table);
+    my $count = 0;
+    for (my $idx = 0; $idx < $size; ++$idx) {
+        my $value;
+        my $decode_ent;
+        my $comment;
+
+        $value = $table[$idx];
+        if (defined($value)) {
+            $decode_ent = "\"" . $value . "\"";
+        }
+        else {
+            $decode_ent = "NULL";
+        }
+        $comment = sprintf('/* %4d */', $idx);
+        if ($count) {
+            print ",\n";
+        }
+        print qq[    ${comment} ${decode_ent}];
+        ++$count;
+    }
+    print "\n};\n";
+    print "\n";
+    print "static unsigned int ${size_var} = ",
+        "sizeof (${table_var}) / sizeof (char *);\n";
+
+    return $err;
+}
+
+#:options:#
+
+GetOptions(@options) or exit 2;
+
+#:main:#
+
+if ($table_var eq '') {
+    $table_var = 'table';
+}
+
+if ($table_var ne '' && $size_var eq '') {
+    $size_var = $table_var . '_size';
+}
+
+my $tmp_pfx;
+my $tmp_src_fname;
+my $tmp_exe_fname;
+my $child;
+my $fh;
+
+if (-d 'tmp') {
+    $tmp_pfx = "tmp/$$-";
+}
+else {
+    $tmp_pfx = "tmp-$$-";
+}
+$tmp_src_fname = $tmp_pfx . 'sym.c';
+$tmp_exe_fname = $tmp_pfx . 'sym.exe';
+
+# Build dictionary of pre-defined symbols
+#
+
+%builtins = ();
+
+$child = open $fh, '-|', 'cpp', '-E', '-dD', '-xc', '/dev/null';
+if (!defined($child)) {
+    eprint "Could not run cpp.\n";
+    fatal(2);
+}
+
+if ($child) {
+    my $rv;
+
+    $rv = make_dictionary_from_cpp_defines(\%builtins, $fh);
+    if ($rv) {
+        fatal(2);
+    }
+}
+
+
+$child = open $fh, '-|', 'cpp', '-E', '-dD', '-xc', @ARGV;
+if (!defined($child)) {
+    eprint "Could not run gcc.\n";
+    fatal(2);
+}
+
+if ($child) {
+    my $rv;
+
+    $rv = gather_definitions($fh, $tmp_src_fname);
+    if ($rv) {
+        exit 2;
+    }
+}
+
+unlink($tmp_exe_fname);
+$Tmp{$tmp_exe_fname} = 1;
+system('gcc', '-o', $tmp_exe_fname, $tmp_src_fname);
+
+my $cmd;
+
+if ($tmp_exe_fname =~ m{/}msx) {
+    $cmd = $tmp_exe_fname;
+}
+else {
+    $cmd = './' . $tmp_exe_fname;
+}
+
+$child = open $fh, '-|', $cmd;
+if (!defined($child)) {
+    eprint "Could not run ${cmd}.\n";
+    fatal(2);
+}
+
+if ($child) {
+    my $rv;
+
+    $rv = eval_definitions($fh);
+    if ($rv) {
+        fatal(2);
+    }
+}
+
+if (!$debug && !$keep_tmp) {
+    cleanup_tmp();
+}
+
+exit 0;
