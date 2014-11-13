@@ -35,6 +35,14 @@
  * and a record/tcp stream.
  */
 
+/*
+ * This file was derived from libc6/eglibc-2.11.1/sunrpc/svc.c.
+ * It was written by Guy Shaw in 2011, under contract to Themis Computer,
+ * http://www.themis.com.  It inherits the copyright and license
+ * from the source code from which it was derived.
+ *
+ */
+
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
