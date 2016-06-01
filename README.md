@@ -68,7 +68,7 @@ The coding style used for RPC-MT can most briefly be described
 as Sun cstyle, but with certain changes.  They are: tabs instead of spaces;
 4 character indent, instead of 8.  No cuddling of braces.
 
-Compatability
+Compatibility
 =============
 RPC-MT introduces one change to the interface.  When a worker thread is done
 handling a request, it must call `svc_return()`.  In practice, this has
