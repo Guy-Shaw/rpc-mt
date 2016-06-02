@@ -62,6 +62,8 @@
 #include "svc_mtxprt.h"
 #include "svc_debug.h"
 
+#define UNUSED(x) (void)(x)
+
 extern void xports_global_lock(void);
 extern void xports_global_unlock(void);
 extern SVCXPRT *alloc_xprt(void);
@@ -401,6 +403,7 @@ rendezvous_request(SVCXPRT *xprt, struct rpc_msg *errmsg)
     socklen_t len;
     int err;
 
+    UNUSED(errmsg);
     r = (struct tcp_rendezvous *)xprt->xp_p1;
 
   again:
@@ -423,7 +426,7 @@ rendezvous_request(SVCXPRT *xprt, struct rpc_msg *errmsg)
 }
 
 static enum xprt_stat
-rendezvous_stat(SVCXPRT *xprt)
+rendezvous_stat(SVCXPRT *xprt  __attribute__((unused)))
 {
     return (XPRT_IDLE);
 }
@@ -495,22 +498,23 @@ svctcp_destroy(SVCXPRT *xprt)
  * (And a read of zero bytes is a half closed stream => error.)
  */
 static int
-readtcp_with_lock(char *xprtptr, char *buf, int len)
+readtcp_with_lock(char *xprtptr, char *buf, int ilen)
 {
     SVCXPRT *xprt;
     int sock;
     int milliseconds;
     struct pollfd pollfd;
+    size_t len;
     ssize_t rdlen;
     int rv;
     int err;
 
-    tprintf("len=%d\n", len);
+    tprintf("ilen=%d\n", ilen);
     xprt = (SVCXPRT *)xprtptr;
     sock = xprt->xp_sock;
     milliseconds = 35 * 1000;
     if (opt_svc_trace) {
-        tprintf("xprt=%s, sock=%d, len=%d\n", decode_addr(xprt), sock, len);
+        tprintf("xprt=%s, sock=%d, ilen=%d\n", decode_addr(xprt), sock, ilen);
         eprintf("        peer=%s\n", decode_inet_peer(sock));
     }
 
@@ -537,9 +541,10 @@ readtcp_with_lock(char *xprtptr, char *buf, int len)
         }
     } while ((pollfd.revents & POLLIN) == 0);
 
+    len = (size_t)ilen;
     rdlen = read(sock, buf, len);
     err = errno;
-    tprintf("read(%d, %s, %u) => %d\n", sock, decode_addr(buf), len, rdlen);
+    tprintf("read(%d, %s, %zu) => %zd\n", sock, decode_addr(buf), len, rdlen);
     if (rdlen > 0) {
         return (ssize_to_int(rdlen));
     }

@@ -6,10 +6,11 @@
 #ifndef _DECODE_H
 #define _DECODE_H 1
 
-#include <stdio.h>		// Import sprintf()
-#include <stdlib.h>		// Import size_t
-#include <stdint.h>		// Import uint32_t, uint64_t
+#include <stdio.h>      // Import sprintf()
+#include <stdlib.h>     // Import size_t
+#include <stdint.h>     // Import uint32_t, uint64_t
 #include <assert.h>
+#include <alloca.h>     // Import alloca()
 
 typedef unsigned int uint_t;
 
@@ -51,7 +52,7 @@ in_buf(char *buf, size_t bufsz, char *pos)
 }
 
 /*
- * Append the string, @var{new}, to the end of the buffer starting
+ * Append the string, @var{newstr}, to the end of the buffer starting
  * at @var{buf} and of length @var{bufsz}.  Rather than scan @var{buf}
  * for the end of string (null byte), we maintain @var{ebuf}, as we go.
  * It is an error (assertion failure) if @var{ebuf} is not contained
@@ -59,7 +60,7 @@ in_buf(char *buf, size_t bufsz, char *pos)
  */
 
 extern char *
-append_buf(char *buf, size_t bufsz, char *ebuf, char const *new);
+append_buf(char *buf, size_t bufsz, char *ebuf, char const *newstr);
 
 /*
  * Given: a buffer starting at @var{buf} of size @var{bufsz},

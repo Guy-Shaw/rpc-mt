@@ -41,6 +41,11 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <libintl.h>
+#include <strings.h>            // Import bzero()
+#include <sys/types.h>
+#include <netinet/in.h>         // Import bindresvport()
+#include <rpc/svc.h>
+
 
 #ifdef IP_PKTINFO
 #include <sys/uio.h>
@@ -213,7 +218,7 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
     buf = guard_malloc(bufsize);
 
     su->su_iosz = bufsize;
-    rpc_buffer(xprt) = buf;
+    rpc_buffer(xprt) = (char *)buf;
     xdrmem_create(&(su->su_xdrs), rpc_buffer(xprt), su->su_iosz, XDR_DECODE);
     su->su_cache = NULL;
     xprt->xp_p2 = (caddr_t)su;
@@ -347,7 +352,7 @@ svcudp_xprt_clone(SVCXPRT *xprt1)
     msgp2->rm_call.cb_cred.oa_base = &(mtxprt2->mtxp_cred[0]);
     msgp2->rm_call.cb_verf.oa_base = &(mtxprt2->mtxp_cred[MAX_AUTH_BYTES]);
     buf = guard_malloc(bufsize);
-    rpc_buffer(xprt2) = buf;
+    rpc_buffer(xprt2) = (char *)buf;
     xdrmem_create(&(su2->su_xdrs), rpc_buffer(xprt2), su2->su_iosz, XDR_DECODE);
     memcpy(rpc_buffer(xprt2), rpc_buffer(xprt1), bufsize);
     xdrs1 = &(su1->su_xdrs);
@@ -400,7 +405,7 @@ svcudp_create(int sock)
 }
 
 static enum xprt_stat
-svcudp_stat(SVCXPRT *xprt)
+svcudp_stat(SVCXPRT *xprt  __attribute__((unused)))
 {
     return (XPRT_IDLE);
 }
@@ -431,7 +436,7 @@ svcudp_recv_with_id_lock(SVCXPRT *xprt, struct rpc_msg *msg)
 {
     struct svcudp_data *su;
     XDR *xdrs;
-    int rlen;
+    ssize_t rlen;
     char *reply;
     u_long replylen;
     socklen_t len;
@@ -499,9 +504,9 @@ svcudp_recv_with_id_lock(SVCXPRT *xprt, struct rpc_msg *msg)
                 mesgp->msg_control = NULL;
                 mesgp->msg_controllen = 0;
             }
-
         }
-    } else {
+    }
+    else {
         rlen = recvfrom(xprt->xp_sock, rpc_buffer(xprt), (int)su->su_iosz, 0, (struct sockaddr *)&(xprt->xp_raddr), &len);
     }
 #else
@@ -513,7 +518,7 @@ svcudp_recv_with_id_lock(SVCXPRT *xprt, struct rpc_msg *msg)
     xprt->xp_addrlen = len;
     if (rlen == -1 && errno == EINTR)
         goto again;
-    if (rlen < (4 * sizeof(uint32_t)))  /* < 4 32-bit ints? */
+    if ((size_t)rlen < (4 * sizeof(uint32_t)))  /* < 4 32-bit ints? */
         return (FALSE);
     xdrs->x_op = XDR_DECODE;
     XDR_SETPOS(xdrs, 0);
@@ -588,14 +593,15 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
     stat = xdr_replymsg(xdrs, msg);
     tprintf("xdr_replymsg() => %d\n", stat);
     if (stat) {
-        size_t slen;
-        ssize_t sent;
+        size_t  slen;
+        size_t  sent;
+        ssize_t rsent;
 
         stat = FALSE;
         slen = (size_t)XDR_GETPOS(xdrs);
 #ifdef IP_PKTINFO
         mesgp = (struct msghdr *)&xprt->xp_pad[sizeof(struct iovec)];
-        tprintf("mesgp->msg_iovlen = %d\n", mesgp->msg_iovlen);
+        tprintf("mesgp->msg_iovlen = %zu\n", mesgp->msg_iovlen);
         if (mesgp->msg_iovlen) {
             iovp = (struct iovec *)&xprt->xp_pad[0];
             iovp->iov_base = rpc_buffer(xprt);
@@ -605,22 +611,23 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
             mesgp->msg_name = &(xprt->xp_raddr);
             mesgp->msg_namelen = (socklen_t) sizeof(struct sockaddr_in);
             tprintf("sendmsg(%d, _, 0)\n", xprt->xp_sock);
-            sent = sendmsg(xprt->xp_sock, mesgp, 0);
+            rsent = sendmsg(xprt->xp_sock, mesgp, 0);
         }
         else {
-            sent = xprt_sendto(xprt, slen);
+            rsent = xprt_sendto(xprt, slen);
         }
 #else
-        sent = xprt_sendto(xprt, slen);
+        rsent = xprt_sendto(xprt, slen);
 #endif
-        if (sent < 0) {
+        if (rsent < 0) {
             err = errno;
             tprintf("err=%d = '%s'\n", err, strerror(err));
         }
-        tprintf("slen=%d, sent=%d\n", slen, sent);
+        sent = (size_t)rsent;
+        tprintf("slen=%zu, sent=%zd\n", slen, sent);
         if (sent == slen) {
             stat = TRUE;
-            if (su->su_cache && slen >= 0) {
+            if (su->su_cache) {
                 cache_set(xprt, (u_long)slen);
             }
         }
@@ -858,7 +865,7 @@ cache_set(SVCXPRT *xprt, u_long replylen)
             CACHE_PERROR("cache_set: victim alloc failed");
             return;
         }
-        newbuf = malloc(su->su_iosz);
+        newbuf = (char *)malloc(su->su_iosz);
         if (newbuf == NULL) {
             free(victim);
             CACHE_PERROR("cache_set: could not allocate new rpc_buffer");

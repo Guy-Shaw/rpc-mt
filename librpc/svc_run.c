@@ -98,7 +98,7 @@ pollfd_realloc(nfds_t nfd)
         size_t sz;
 
         sz = sizeof(struct pollfd) * pollfd_alloc;
-        new_pollfd = guard_realloc(prev_pollfd, sz);
+        new_pollfd = (struct pollfd *)guard_realloc(prev_pollfd, sz);
         prev_pollfd = new_pollfd;
         prev_pollfd_alloc = pollfd_alloc;
     }
@@ -110,7 +110,7 @@ void
 svc_run(void)
 {
     struct pollfd *my_pollfd = NULL;
-    int max_pollfd;
+    nfds_t max_pollfd;
     nfds_t npoll;
     nfds_t i;
     int err;

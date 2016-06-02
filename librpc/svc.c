@@ -486,7 +486,7 @@ void
 show_xports_pollfd(void)
 {
     struct pollfd *pollfdv;
-    int slot;
+    nfds_t slot;
 
     pollfdv = xports_pollfd;
     eprintf("\n");
@@ -499,7 +499,7 @@ show_xports_pollfd(void)
     eprintf("  ----- ---\n");
     for (slot = 0; slot < xports_max_pollfd; ++slot) {
         if (pollfdv[slot].fd != -1) {
-            eprintf("  %5u %3u\n", slot, pollfdv[slot].fd);
+            eprintf("  %5lu %3u\n", slot, pollfdv[slot].fd);
         }
     }
 }
@@ -1349,7 +1349,7 @@ void
 svc_getreq_poll_mt(struct pollfd *pfdp, nfds_t npoll, int pollretval)
 {
     int fds_found;
-    int i;
+    nfds_t i;
 
     if (pollretval == 0)
         return;

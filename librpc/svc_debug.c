@@ -54,7 +54,7 @@ guard_malloc(size_t size)
 
     mem = malloc(size);
     if (mem == (void *)0) {
-        teprintf("malloc(%u) failed.\n", size);
+        teprintf("malloc(%zu) failed.\n", size);
         svc_die();
     }
     return (mem);
@@ -67,7 +67,7 @@ guard_realloc(void *old_mem, size_t size)
 
     new_mem = realloc(old_mem, size);
     if (new_mem == (void *)0) {
-        teprintf("realloc(size=%u) failed.\n", size);
+        teprintf("realloc(size=%zu) failed.\n", size);
         svc_die();
     }
     return (new_mem);

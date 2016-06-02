@@ -33,7 +33,7 @@ extern pthread_mutex_t trace_lock;
 #define trace_printf_with_lock(fmt, ...) \
     ({ \
         fflush(stderr); \
-        fprintf(stderr, "\n@%#x:%s:%u:%s: " fmt, \
+        fprintf(stderr, "\n@%#lx:%s:%u:%s: " fmt, \
             (uintptr_t)pthread_self(), __FILE__, __LINE__, __FUNCTION__, \
             ## __VA_ARGS__); \
         fflush(stderr); \
@@ -49,7 +49,7 @@ extern pthread_mutex_t trace_lock;
 #define teprintf_with_lock(fmt, ...) \
     ({ \
         fflush(stderr); \
-        fprintf(stderr, "\n@%#x:%s:%u:%s: ***ERROR***\n    " fmt, \
+        fprintf(stderr, "\n@%#lx:%s:%u:%s: ***ERROR***\n    " fmt, \
             (uintptr_t)pthread_self(), __FILE__, __LINE__, __FUNCTION__, \
             ## __VA_ARGS__); \
         fflush(stderr); \
