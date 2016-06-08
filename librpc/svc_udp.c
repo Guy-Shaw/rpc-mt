@@ -239,6 +239,7 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
     if (pthread_mutex_init(&(mtxprt->mtxp_progress_lock), NULL) != 0) {
         abort();
     }
+    mtxprt->mtxp_progress = 0;
     xprt_set_busy(xprt, 0);
     xprt_unlock(xprt);
 
