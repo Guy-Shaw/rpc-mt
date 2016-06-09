@@ -345,6 +345,7 @@ svcudp_xprt_clone(SVCXPRT *xprt1)
     if (pthread_mutex_init(&(mtxprt2->mtxp_progress_lock), NULL) != 0) {
         abort();
     }
+    mtxprt2->mtxp_progress = 0;
     xprt_set_busy(xprt2, 0);
     rqstp2 = &(mtxprt2->mtxp_rqst);
     msgp2 = &(mtxprt2->mtxp_msg);
