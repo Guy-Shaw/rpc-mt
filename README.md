@@ -54,15 +54,19 @@ extensions and of Linux-specific system calls.
 
 Cleanliness
 ===========
-RPC-MT runs Valgrind-clean.  It is clean with respect to
-`gcc -Wall -Wextra`.  I have not used any brand of lint on it,
-also partly because of GCC extensions.
+RPC-MT runs Valgrind-clean, using
+`--tool=memcheck`,
+`--tool=helgrind`,
+and `--tool=drd`.
 
 All code is written in a subset of C that is also
-legal C++.
+legal C++, more or less after the fashion of Lua code.
 All the code compiles clean using both gcc and clang
 with options, `-Wall -Wextra`, and all code compiles
 clean using g++ and clang++.
+
+I have not run any third-party lint tools,
+partly because of GCC extensions.
 
 Coding style
 ============
