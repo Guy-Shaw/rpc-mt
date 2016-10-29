@@ -55,6 +55,18 @@
 #include "svc_debug.h"
 #include "util.h"
 
+/*
+ * SFR := Server Flight Recorder
+ *
+ * Conditionally compile code to instrument all transactions related
+ * to sockets.  Each time a new socket is associated with a @type{SVCXPRT},
+ * record:
+ *   1) the high-resolution timestamp,
+ *   2) the thread id,
+ *   3) the processor id,
+ */
+#define SFR_SOCKET 1
+
 pthread_mutex_t trace_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*
@@ -70,6 +82,26 @@ pthread_mutex_t trace_lock = PTHREAD_MUTEX_INITIALIZER;
 static SVCXPRT **xports;
 static SVCXPRT **xports_view;
 static SVCXPRT **sock_xports;
+
+#if defined(SFR_SOCKET)
+
+#include <stdint.h>
+#include "rdtsc.h"
+
+typedef uint64_t hrtime_t;
+typedef int processorid_t;
+
+struct sock_sfr {
+    hrtime_t      sfr_timestamp;
+    pthread_t     sfr_tid;
+    processorid_t sfr_psr;
+};
+
+typedef struct sock_sfr sock_sfr_t;
+
+static sock_sfr_t * sock_sfr;
+
+#endif
 
 static fd_set xports_fdset;
 static fd_set xprtgc_fdset;
@@ -219,36 +251,52 @@ xprt_gc_mark(SVCXPRT *xprt)
     pthread_mutex_unlock(&xprtgc_lock);
 }
 
+static int
+xprt_gc_reap_one(int id)
+{
+    SVCXPRT *xprt;
+    mtxprt_t *mtxprt;
+    int count;
+
+    if (!FD_ISSET(id, &xprtgc_fdset)) {
+        return (0);
+    }
+
+    pthread_mutex_lock(&xprtgc_lock);
+    if (FD_ISSET(id, &xprtgc_fdset)) {
+        xprt = xports[id];
+        mtxprt = xprt_to_mtxprt(xprt);
+        if (mtxprt->mtxp_parent != NO_PARENT || mtxprt->mtxp_refcnt == 0) {
+            tprintf("xprt=%s\n", decode_addr(xprt));
+            SVC_DESTROY(xprt);
+            count = 1;
+        }
+        FD_CLR(id, &xprtgc_fdset);
+        --xprtgc_mark_count;
+    }
+    pthread_mutex_unlock(&xprtgc_lock);
+
+    return (count);
+}
+
 /*
  * Do actual destruction of @type{SVCXPRT}s that have been used,
  * and then marked for garbage collection.
  */
 
 static int
-xprt_gc_reap(void)
+xprt_gc_reap_all(void)
 {
-    SVCXPRT *xprt;
-    mtxprt_t *mtxprt;
     int id;
     int count;
 
-    pthread_mutex_lock(&xprtgc_lock);
     tprintf("%d SVCXPRT to be destroyed\n", xprtgc_mark_count);
     count = 0;
     for (id = 0; id < xports_size && xprtgc_mark_count != 0; ++id) {
         if (FD_ISSET(id, &xprtgc_fdset)) {
-            xprt = xports[id];
-            mtxprt = xprt_to_mtxprt(xprt);
-            if (mtxprt->mtxp_parent != NO_PARENT || mtxprt->mtxp_refcnt == 0) {
-                tprintf("xprt=%s\n", decode_addr(xprt));
-                SVC_DESTROY(xprt);
-                ++count;
-            }
-            FD_CLR(id, &xprtgc_fdset);
-            --xprtgc_mark_count;
+            count += xprt_gc_reap_one(id);
         }
     }
-    pthread_mutex_unlock(&xprtgc_lock);
     return (count);
 }
 
@@ -752,6 +800,10 @@ create_xports(void)
     xports = (SVCXPRT **) guard_malloc(size * sizeof (SVCXPRT *));
     xports_view = (SVCXPRT **) guard_malloc(size * sizeof (SVCXPRT *));
     sock_xports = (SVCXPRT **) guard_malloc(size * sizeof (SVCXPRT *));
+#ifdef SFR_SOCKET
+    sock_sfr = (sock_sfr_t *) guard_malloc(size * sizeof (sock_sfr_t));
+    memset((void *)sock_sfr, 0, size * sizeof (sock_sfr_t));
+#endif
     init_xports(xports, size);
     init_xports(xports_view, size);
     init_xports(sock_xports, size);
@@ -855,6 +907,32 @@ xprt_id_alloc(void)
     return (id);
 }
 
+#ifdef SFR_SOCKET
+
+static inline void
+sfr_track_xprt_socket(int sock, SVCXPRT *xprt)
+{
+    sock_sfr_t *sfr = &sock_sfr[sock];
+
+    sfr->sfr_timestamp = 0;	// Not valid
+    sock_xports[sock] = xprt;
+    sfr->sfr_psr = sched_getcpu();
+    sfr->sfr_tid = pthread_self();
+
+    // Record timestamp, and at the same time, mark sfr record as valid
+    sfr->sfr_timestamp = rdtsc();
+}
+
+#else
+
+static inline void
+sfr_track_xprt_socket(int sock, SVCXPRT *xprt)
+{
+    sock_xports[sock] = xprt;
+}
+
+#endif /* SFR_SOCKET */
+
 /*
  * Add a @type{SVCXPRT} data structure to @var{xports} and @var{sock_xports}.
  * This operation needs to be protected by @var{xports_lock}.
@@ -914,7 +992,7 @@ xprt_register_with_lock(SVCXPRT *xprt)
             svc_die();
         }
 
-        sock_xports[sock] = xprt;
+        sfr_track_xprt_socket(sock, xprt);
         err = init_pollfd(sock);
     }
     else {
@@ -1262,7 +1340,7 @@ svcerr_noprog(SVCXPRT *xprt)
 
 /*
  * Program version mismatch error reply
-*/
+ */
 void
 svcerr_progvers(SVCXPRT *xprt, rpcvers_t low_vers, rpcvers_t high_vers)
 {
@@ -1415,7 +1493,7 @@ svc_xprt_clone(SVCXPRT *xprt)
  */
 
 void
-wait_on_progress(SVCXPRT *xprt, int mask, char *desc)
+wait_on_progress(SVCXPRT *xprt, int mask, const char *desc)
 {
     const struct timespec ms = { 0, 1000000 };
     mtxprt_t *mtxprt;
@@ -1449,7 +1527,7 @@ svc_getreq_common_rv(const int fd)
     check_xports();
     xports_global_unlock();
 
-    (void)xprt_gc_reap();
+    (void)xprt_gc_reap_all();
 
     xprt = sock_xports[fd];
 
@@ -1470,7 +1548,7 @@ svc_getreq_common_rv(const int fd)
 
     /* Now receive msgs from xprt (support batch calls) */
     do {
-        (void)xprt_gc_reap();
+        (void)xprt_gc_reap_all();
         mtxprt = xprt_to_mtxprt(xprt);
         msgp = &mtxprt->mtxp_msg;
         msgp->rm_call.cb_cred.oa_base = &(mtxprt->mtxp_cred[0]);
@@ -1587,8 +1665,16 @@ svc_getreq_common_rv(const int fd)
       call_done:
         tprintf("call_done:\n");
         if ((stat = SVC_STAT(worker_xprt)) == XPRT_DIED) {
+            int sock;
+
             tprintf("XPRT_DIED.\n"
                 " worker_xprt=%s\n", decode_addr(worker_xprt));
+            sock = worker_xprt->xp_sock;
+            if (sock != -1) {
+                // lock
+                sock_xports[sock] = BAD_SVCXPRT_PTR;
+                // unlock
+            }
             xprt_gc_mark(worker_xprt);
             break;
         }

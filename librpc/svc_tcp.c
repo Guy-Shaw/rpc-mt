@@ -101,8 +101,7 @@ static bool_t svctcp_reply(SVCXPRT *, struct rpc_msg *);
 static bool_t svctcp_freeargs(SVCXPRT *, xdrproc_t, caddr_t);
 static void svctcp_destroy(SVCXPRT *);
 
-static const struct xp_ops svctcp_op =
-{
+static const xp_ops_t svctcp_op = {
     svctcp_recv,
     svctcp_stat,
     svctcp_getargs,
@@ -128,7 +127,7 @@ svctcp_rendezvous_abort(void)
     abort();
 }
 
-static const struct xp_ops svctcp_rendezvous_op = {
+static const xp_ops_t svctcp_rendezvous_op = {
     rendezvous_request,
     rendezvous_stat,
     (bool_t (*) (SVCXPRT *, xdrproc_t, caddr_t)) svctcp_rendezvous_abort,
@@ -294,6 +293,7 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
     if (pthread_mutex_init(&(mtxprt->mtxp_progress_lock), NULL) != 0) {
         abort();
     }
+    mtxprt->mtxp_progress = 0;
     xprt_set_busy(xprt, 0);
     xprt_unlock(xprt);
     xprt_register(xprt);
@@ -357,7 +357,7 @@ makefd_xprt_with_lock(int fd, u_int sendsize, u_int recvsize)
     if (pthread_mutex_lock(&(mtxprt->mtxp_lock)) != 0) {
         abort();
     }
-
+    mtxprt->mtxp_progress = 0;
     xprt->xp_p2 = NULL;
     xprt->xp_p1 = (caddr_t)cd;
     xprt->xp_verf.oa_base = cd->verf_body;

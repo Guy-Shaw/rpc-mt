@@ -83,7 +83,7 @@ static bool_t svcudp_freeargs(SVCXPRT *, xdrproc_t, caddr_t);
 static void svcudp_destroy(SVCXPRT *);
 static SVCXPRT *svcudp_xprt_clone(SVCXPRT *);
 
-static const struct xp_ops svcudp_op = {
+static const xp_ops_t svcudp_op = {
     svcudp_recv,
     svcudp_stat,
     svcudp_getargs,

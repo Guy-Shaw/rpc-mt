@@ -65,7 +65,7 @@ extern pthread_mutex_t trace_lock;
 #define tprintf(fmt, ...) \
     ({ if (opt_svc_trace) { trace_printf(fmt, ## __VA_ARGS__); } })
 
-#define BAD_SVCXPRT_PTR ((void *)(-1))
+#define BAD_SVCXPRT_PTR ((SVCXPRT *)(-1))
 
 extern void show_xports(void);
 extern void svc_trace(void);
