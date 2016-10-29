@@ -65,8 +65,13 @@ in this case.
 Coding style
 ============
 The coding style used for RPC-MT can most briefly be described
-as Sun cstyle, but with certain changes.  They are: tabs instead of spaces;
-4 character indent, instead of 8.  No cuddling of braces.
+as Sun cstyle, but with certain changes.
+
+They are:
+
+  1. spaces insteaed of tabs;
+  2. 4 character indent, instead of 8;
+  3. no cuddling of braces.
 
 Compatibility
 =============
