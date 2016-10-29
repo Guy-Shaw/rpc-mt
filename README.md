@@ -58,9 +58,11 @@ RPC-MT runs Valgrind-clean.  It is clean with respect to
 `gcc -Wall -Wextra`.  I have not used any brand of lint on it,
 also partly because of GCC extensions.
 
-When it is appropriate, I run both GCC and Clang to compile code, but
-because RPC-MT code uses GCC extensions, it does not seem to be worth while,
-in this case.
+All code is written in a subset of C that is also
+legal C++.
+All the code compiles clean using both gcc and clang
+with options, `-Wall -Wextra`, and all code compiles
+clean using g++ and clang++.
 
 Coding style
 ============

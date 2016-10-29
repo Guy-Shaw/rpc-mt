@@ -256,7 +256,7 @@ xprt_gc_reap_one(int id)
 {
     SVCXPRT *xprt;
     mtxprt_t *mtxprt;
-    int count;
+    int count = 0;
 
     if (!FD_ISSET(id, &xprtgc_fdset)) {
         return (0);
