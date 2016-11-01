@@ -61,3 +61,9 @@ decode_inet_family_r(char *buf, size_t bufsz, int family)
     append_buf(buf, bufsz, ebuf, str_family);
     return (buf);
 }
+
+char *
+decode_inet_family(int family)
+{
+    return (decode_inet_family_r(dbuf_slot_alloc(2), DBUF_SIZE, family));
+}

@@ -91,6 +91,8 @@ static SVCXPRT **sock_xports;
 typedef uint64_t hrtime_t;
 typedef int processorid_t;
 
+static hrtime_t t0 = 0;
+
 struct sock_sfr {
     hrtime_t      sfr_timestamp;
     pthread_t     sfr_tid;
@@ -414,6 +416,10 @@ xprt_is_busy(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
     int busy;
+
+    if (xprt == BAD_SVCXPRT_PTR) {
+        return (0);
+    }
 
     mtxprt = xprt_to_mtxprt(xprt);
     pthread_mutex_lock(&(mtxprt->mtxp_progress_lock));
@@ -912,6 +918,10 @@ xprt_id_alloc(void)
 static inline void
 sfr_track_xprt_socket(int sock, SVCXPRT *xprt)
 {
+    if (t0 == 0) {
+        t0 = rdtsc();
+    }
+
     sock_sfr_t *sfr = &sock_sfr[sock];
 
     sfr->sfr_timestamp = 0;	// Not valid
@@ -920,7 +930,7 @@ sfr_track_xprt_socket(int sock, SVCXPRT *xprt)
     sfr->sfr_tid = pthread_self();
 
     // Record timestamp, and at the same time, mark sfr record as valid
-    sfr->sfr_timestamp = rdtsc();
+    sfr->sfr_timestamp = rdtsc() - t0;
 }
 
 #else
@@ -932,6 +942,37 @@ sfr_track_xprt_socket(int sock, SVCXPRT *xprt)
 }
 
 #endif /* SFR_SOCKET */
+
+
+/*
+ * Sockets already in use are accounted for in the array, sock_xports[].
+ *
+ * A socket is available for reuse if its entry in that array is
+ * NULL or BAD_SVCXPRT_PTR.  It is also OK to reuse a socket if its
+ * entry in sock_xports[] refers to a SVCXPRT structure that has
+ * completed, but has not yet been destroyed.  Presumably, that
+ * SVCXPRT is on the GC list.
+ */
+static int
+socket_xprt_is_available(SVCXPRT *sxprt)
+{
+    mtxprt_t *mtxprt;
+
+    if (sxprt == NULL) {
+        return (1);
+    }
+
+    if (sxprt == BAD_SVCXPRT_PTR) {
+        return (1);
+    }
+
+    mtxprt = xprt_to_mtxprt(sxprt);
+    if (mtxprt->mtxp_progress & XPRT_DONE_RETURN) {
+        return (1);
+    }
+
+    return (0);
+}
 
 /*
  * Add a @type{SVCXPRT} data structure to @var{xports} and @var{sock_xports}.
@@ -986,7 +1027,7 @@ xprt_register_with_lock(SVCXPRT *xprt)
         SVCXPRT *sxprt;
 
         sxprt = sock_xports[sock];
-        if (sxprt != NULL && sxprt != BAD_SVCXPRT_PTR) {
+        if (!socket_xprt_is_available(sxprt)) {
             teprintf("sock_xports[sock]=%s -- should be vacant.\n",
                 decode_addr(sxprt));
             svc_die();
@@ -1672,7 +1713,7 @@ svc_getreq_common_rv(const int fd)
             sock = worker_xprt->xp_sock;
             if (sock != -1) {
                 // lock
-                sock_xports[sock] = BAD_SVCXPRT_PTR;
+                // sock_xports[sock] = BAD_SVCXPRT_PTR;
                 // unlock
             }
             xprt_gc_mark(worker_xprt);

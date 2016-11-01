@@ -10,9 +10,12 @@
 #include <stdlib.h>     // Import size_t
 #include <stdint.h>     // Import uint32_t, uint64_t
 #include <assert.h>
-#include <alloca.h>     // Import alloca()
 
 typedef unsigned int uint_t;
+
+extern char *dbuf_slot_alloc(size_t slot);
+
+#define DBUF_SIZE 100
 
 /*
  * Helper functions.
@@ -71,61 +74,19 @@ append_buf(char *buf, size_t bufsz, char *ebuf, char const *newstr);
  *
  * Like @function{strend}, but buffer size is enforced.
  */
-extern char *
-buf_end(char *buf, size_t bufsz, char *p);
+extern char *buf_end(char *buf, size_t bufsz, char *p);
 
 
-extern char *
-decode_poll_events_r(char *buf, size_t bufsz, int events);
-
-static inline char *
-decode_poll_events(int events)
-{
-    void *buf = alloca(100);
-    return (decode_poll_events_r((char *)buf, 100, events));
-}
-
-extern char *
-decode_inet_family_r(char *buf, size_t bufsz, int family);
-
-static inline char *
-decode_inet_family(int family)
-{
-    void *buf = alloca(20);
-    return (decode_inet_family_r((char *)buf, 20, family));
-}
-
-extern char *
-decode_inet_endpoint_r(char *buf, size_t bufsz, void *inet_addr);
-
-static inline char *
-decode_inet_endpoint(void *inet_addr)
-{
-    void *buf = alloca(100);
-    return (decode_inet_endpoint_r((char *)buf, 100, inet_addr));
-}
-
-extern char *
-decode_inet_peer_r(char *buf, size_t bufsz, int socket);
-
-static inline char *
-decode_inet_peer(int socket)
-{
-    void *buf = alloca(100);
-    return (decode_inet_peer_r((char *)buf, 100, socket));
-}
-
-extern char *
-decode_int_r(char *buf, size_t bufsz, int i);
-
-static inline char *
-decode_int(int i)
-{
-    void *buf = alloca(20);
-    return (decode_int_r((char *)buf, 20, i));
-}
-
-extern int
-popcount_int(int);
+extern char *decode_poll_events_r(char *buf, size_t bufsz, int events);
+extern char *decode_poll_events(int events);
+extern char *decode_inet_family_r(char *buf, size_t bufsz, int family);
+extern char *decode_inet_family(int family);
+extern char *decode_inet_endpoint_r(char *buf, size_t bufsz, void *inet_addr);
+extern char *decode_inet_endpoint(void *inet_addr);
+extern char *decode_inet_peer_r(char *buf, size_t bufsz, int socket);
+extern char *decode_inet_peer(int socket);
+extern char *decode_int_r(char *buf, size_t bufsz, int i);
+extern char *decode_int(int i);
+extern int   popcount_int(int);
 
 #endif /* _DECODE_H */

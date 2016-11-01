@@ -24,3 +24,9 @@ decode_inet_peer_r(char *buf, size_t bufsz, int socket)
     }
     return (buf);
 }
+
+char *
+decode_inet_peer(int socket)
+{
+    return (decode_inet_peer_r(dbuf_slot_alloc(4), DBUF_SIZE, socket));
+}

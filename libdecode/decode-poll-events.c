@@ -96,3 +96,9 @@ decode_poll_events_r(char *buf, size_t bufsz, int events)
     }
     return (buf);
 }
+
+char *
+decode_poll_events(int events)
+{
+    return (decode_poll_events_r(dbuf_slot_alloc(1), DBUF_SIZE, events));
+}
