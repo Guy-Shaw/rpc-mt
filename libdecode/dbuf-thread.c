@@ -1,6 +1,7 @@
 /*
  * Filename: bduf-thread.c
  * Project: libdecode
+ * Library: libdecode
  * Brief: Manage per-thread "pseaudo-static" decode buffers.
  *
  * Copyright (C) 2016 Guy Shaw

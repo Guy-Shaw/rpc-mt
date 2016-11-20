@@ -48,8 +48,6 @@ hfiles: $(SRC_C:%.c=%.H)
 	$(CC) -H -c $(CFLAGS) $< >$@ 2>&1
 
 
-$(OBJ): decode.h
-
 libdecode.so: $(OBJ)
 	rm -f libdecode.so libdecode.so.1
 	$(CC) -shared -Wl,-soname,libdecode.so.1 -o libdecode.so.1.0.1 $(CFLAGS) $(SRC_C)
