@@ -1,34 +1,32 @@
+/*
+ * Filename: util.c
+ * Project: libdecode
+ * Library: libdecode
+ * Brief: Low-level support functions
+ *
+ * Copyright (C) 2016 Guy Shaw
+ * Written by Guy Shaw <gshaw@acm.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
-#include "decode.h"
+#include <assert.h>
+    // Import assert()
+#include <unistd.h>
+    // Import type size_t
 
-#define NSLOTS 8
-
-static char buf01[128];
-static char buf02[128];
-static char buf03[128];
-static char buf04[128];
-static char buf05[128];
-static char buf06[128];
-static char buf07[128];
-static char buf08[128];
-
-static char *dbuf[NSLOTS] = {
-    &buf01[0],
-    &buf02[0],
-    &buf03[0],
-    &buf04[0],
-    &buf05[0],
-    &buf06[0],
-    &buf07[0],
-    &buf08[0]
-};
-
-char *
-dbuf_slot_alloc(size_t slot)
-{
-    assert(slot < NSLOTS);
-    return (dbuf[slot]);
-}
+#include <decode-impl.h>
 
 /*
  * Utiliy functions used by many libdecode functions.
