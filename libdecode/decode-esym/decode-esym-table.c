@@ -1,4 +1,4 @@
-static char *errno_table[] = {
+static const char *errno_table[] = {
     /*    0 */ NULL,
     /*    1 */ "EPERM",
     /*    2 */ "ENOENT",

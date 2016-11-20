@@ -1,10 +1,13 @@
-CC = @CC@
+CC := @CC@
 
-GFLAGS = -g -ggdb -g3
-CFLAGS = $(GFLAGS) -Wall -pthread -fPIC -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC
+CPPFLAGS := -I../inc -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC
+GFLAGS := -g -ggdb -g3
+CFLAGS := $(GFLAGS) -Wall -pthread -fPIC $(CPPFLAGS)
 
-SRC_C = \
+SRC_C := \
+    dbuf-thread.c \
     decode-addr.c \
+    decode-size.c \
     decode-poll-events.c \
     decode-inet-family.c \
     decode-inet-endpoint.c \
@@ -12,12 +15,13 @@ SRC_C = \
     decode-esym.c \
     decode-errno.c \
     decode-int.c \
+    strict-conv.c \
     util.c \
     ###
 
-SRC_I = $(SRC_C:%.c=%.i)
-SRC_M = $(SRC_C:%.c=%.m)
-OBJ = $(SRC_C:%.c=%.o)
+SRC_I := $(SRC_C:%.c=%.i)
+SRC_M := $(SRC_C:%.c=%.m)
+OBJ := $(SRC_C:%.c=%.o)
 
 .PHONY: all dev ifiles mfiles hfiles clean
 
@@ -61,6 +65,9 @@ clean:
 distclean: clean
 	# Clean files created by autotools
 	rm -f Makefile config.status config.log configure.ac
+
+mcc:
+	mcc --mcc:all --mcc:header $(CFLAGS) -c -- $(SRC_C)
 
 show:
 	echo SRC_C = $(SRC_C)

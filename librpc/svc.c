@@ -51,9 +51,9 @@
 #include <poll.h>
 #include <pthread.h>
 
+#include "pthread_util.h"
 #include "svc_mtxprt.h"
 #include "svc_debug.h"
-#include "util.h"
 
 /*
  * SFR := Server Flight Recorder

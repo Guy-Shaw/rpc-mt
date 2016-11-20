@@ -1,10 +1,31 @@
 /*
- * File: svc_debug.h
- * 
+ * Filename: svc_debug.h
+ * Project: rpc-mt
+ * Brief: Debug/trace helper functions specific to svc
+ *
+ * Copyright (C) 2016 Guy Shaw
+ * Written by Guy Shaw <gshaw@acm.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef _SVC_DEBUG_H
 #define _SVC_DEBUG_H 1
+
+#ifdef  __cplusplus
+extern "C" {
+#endif
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -12,12 +33,13 @@
 #include <assert.h>
 #include <execinfo.h>
 
-#include "decode.h"
+#include <decode-impl.h>
 
 extern pthread_mutex_t trace_lock;
 
 #define eprintf_with_lock(fmt, ...) \
     ({ \
+        dbuf_thread_reset(); \
         fflush(stderr); \
         fprintf(stderr, fmt, ## __VA_ARGS__); \
         fflush(stderr); \
@@ -32,6 +54,7 @@ extern pthread_mutex_t trace_lock;
 
 #define trace_printf_with_lock(fmt, ...) \
     ({ \
+        dbuf_thread_reset(); \
         fflush(stderr); \
         fprintf(stderr, "\n@%#lx:%s:%u:%s: " fmt, \
             (uintptr_t)pthread_self(), __FILE__, __LINE__, __FUNCTION__, \
@@ -48,6 +71,7 @@ extern pthread_mutex_t trace_lock;
 
 #define teprintf_with_lock(fmt, ...) \
     ({ \
+        dbuf_thread_reset(); \
         fflush(stderr); \
         fprintf(stderr, "\n@%#lx:%s:%u:%s: ***ERROR***\n    " fmt, \
             (uintptr_t)pthread_self(), __FILE__, __LINE__, __FUNCTION__, \
@@ -70,37 +94,14 @@ extern pthread_mutex_t trace_lock;
 extern void show_xports(void);
 extern void svc_trace(void);
 extern void svc_die(void);
-extern void *guard_malloc(size_t size);
-extern void *guard_realloc(void *old, size_t size);
 extern void svc_perror(int err, const char *s);
 
 extern int opt_svc_trace;
 
-char *decode_addr_r(char *buf, size_t bufsz, void *addr);
-char *decode_poll_events_r(char *buf, size_t bufsz, int events);
-char * decode_esym_r(char *buf, size_t bufsz, int err);
+extern int ssize_to_int(ssize_t ssz);
 
-
-#define decode_addr(addr) \
-    ({ \
-        void *_tmp_addr = (addr); \
-        void *_tmp_buf = alloca(32); \
-        decode_addr_r((char *)_tmp_buf, 32, _tmp_addr); \
-    })
-
-static inline int
-ssize_to_int(ssize_t size)
-{
-    int isize;
-    ssize_t vsize;
-
-    isize = size;
-    vsize = isize;
-    if (vsize != size) {
-        tprintf("Data loss converting from ssize to int.\n");
-        abort();
-    }
-    return (isize);
+#ifdef  __cplusplus
 }
+#endif
 
 #endif /* _SVC_DEBUG_H */

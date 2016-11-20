@@ -1,12 +1,12 @@
-CC = @CC@
+CC := @CC@
 
-GFLAGS = -g -ggdb -g3
-CFLAGS = $(GFLAGS) -Wall -Wextra -I./inc -pthread -fPIC -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC -D_RPC_THREAD_SAFE_
+GFLAGS := -g -ggdb -g3
+CFLAGS := $(GFLAGS) -Wall -Wextra -I../inc -pthread -fPIC -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC -D_RPC_THREAD_SAFE_
 
-SRC_C = svc_run.c svc.c svc_tcp.c svc_udp.c svc_debug.c util.c
-SRC_I = $(SRC_C:%.c=%.i)
-SRC_M = $(SRC_C:%.c=%.m)
-OBJ = $(SRC_C:%.c=%.o)
+SRC_C := svc_run.c svc.c svc_tcp.c svc_udp.c svc_debug.c pthread_util.c
+SRC_I := $(SRC_C:%.c=%.i)
+SRC_M := $(SRC_C:%.c=%.m)
+OBJ := $(SRC_C:%.c=%.o)
 
 .PHONY: all dev ifiles clean
 

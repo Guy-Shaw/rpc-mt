@@ -1,7 +1,7 @@
 #include <sys/socket.h>
 #include <errno.h>
 
-#include "decode.h"
+#include <decode-impl.h>
 
 char *
 decode_inet_peer_r(char *buf, size_t bufsz, int socket)
@@ -28,5 +28,5 @@ decode_inet_peer_r(char *buf, size_t bufsz, int socket)
 char *
 decode_inet_peer(int socket)
 {
-    return (decode_inet_peer_r(dbuf_slot_alloc(4), DBUF_SIZE, socket));
+    return (decode_inet_peer_r(dbuf_thread_alloc(64), 64, socket));
 }

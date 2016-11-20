@@ -1,7 +1,30 @@
+/*
+ * Filename: decode-poll-events.c
+ * Project: libdecode
+ * Library: libdecode
+ * Brief: Decode requested or returned events related to the poll() system call
+ *
+ * Copyright (C) 2016 Guy Shaw
+ * Written by Guy Shaw <gshaw@acm.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
+#include <decode-impl.h>
+
+#include <stdio.h>      // snprintf()
 #include <poll.h>
-
-#include "decode.h"
 
 #define DECODE_POLLSYM(sym) \
     ({ \
@@ -24,7 +47,7 @@ decode_poll_events_r(char *buf, size_t bufsz, int events)
     int err;
     int count;
 
-    sprintf(buf, "%#x=", events);
+    snprintf(buf, bufsz, "%#x=", events);
     ebuf = strend(buf);
 
     count = 0;
@@ -100,5 +123,5 @@ decode_poll_events_r(char *buf, size_t bufsz, int events)
 char *
 decode_poll_events(int events)
 {
-    return (decode_poll_events_r(dbuf_slot_alloc(1), DBUF_SIZE, events));
+    return (decode_poll_events_r(dbuf_thread_alloc(128), 128, events));
 }

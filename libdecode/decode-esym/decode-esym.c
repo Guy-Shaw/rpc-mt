@@ -1,7 +1,7 @@
 
 #include "decode.h"
 
-static char *errno_table[] = {
+static const char *errno_table[] = {
     /*    0 */ NULL,
     /*    1 */ "EPERM",
     /*    2 */ "ENOENT",
@@ -141,20 +141,20 @@ static char *errno_table[] = {
 static unsigned int errno_table_size = sizeof (errno_table) / sizeof (char *);
 
 char *
-decode_esym_r(char *buf, size_t bufsz, int err)
+decode_esym_r(char *buf, size_t bufsz, int ierr)
 {
-    char number_buf[10];
-    char *sym;
+    const char *sym;
 
     sym = NULL;
-    if (err >= 0 && err < errno_table_size) {
-        sym = errno_table[err];
+    if (ierr >= 0 && (size_t)ierr < errno_table_size) {
+        sym = errno_table[(size_t)ierr];
     }
 
-    if (sym == NULL) {
-        sprintf(number_buf, "#%d", err);
-        sym = number_buf;
+    if (sym) {
+        append_buf(buf, bufsz, buf, sym);
     }
-    append_buf(buf, bufsz, buf, sym);
+    else {
+        snprintf(buf, bufsz, "#%d", ierr);
+    }
     return (buf);
 }

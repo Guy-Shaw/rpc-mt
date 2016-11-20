@@ -1,7 +1,31 @@
+/*
+ * Filename: decode-inet-family.c
+ * Project: libdecode
+ * Library: libdecode
+ * Brief: Decode the inet family (int) of an Internet connection
+ *
+ * Copyright (C) 2016 Guy Shaw
+ * Written by Guy Shaw <gshaw@acm.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
-#include "decode.h"
+#include <stdio.h>      // snprintf()
 
-static char *inet_af_table[] = {
+#include <decode-impl.h>
+
+static const char *inet_af_table[] = {
     /*    0 */ "AF_UNSPEC",
     /*    1 */ "AF_UNIX",
     /*    2 */ "AF_INET",
@@ -42,18 +66,19 @@ static char *inet_af_table[] = {
     /*   37 */ "AF_MAX"
 };
 
-static unsigned int inet_af_table_size = sizeof (inet_af_table) / sizeof (char *);
+#define ELEMENTS(array) (sizeof (array) / sizeof (inet_af_table[0]))
 
 char *
 decode_inet_family_r(char *buf, size_t bufsz, int family)
 {
     char *ebuf;
-    char *str_family;
+    const char *str_family;
+    size_t inet_af_table_size = ELEMENTS(inet_af_table);
 
-    sprintf(buf, "%u=", family);
+    snprintf(buf, bufsz, "%u=", family);
     ebuf = strend(buf);
-    if (family >= 0 && family < inet_af_table_size) {
-        str_family = inet_af_table[family];
+    if (family >= 0 && (size_t)family < inet_af_table_size) {
+        str_family = inet_af_table[(size_t)family];
     }
     else {
         str_family = "?";
@@ -65,5 +90,5 @@ decode_inet_family_r(char *buf, size_t bufsz, int family)
 char *
 decode_inet_family(int family)
 {
-    return (decode_inet_family_r(dbuf_slot_alloc(2), DBUF_SIZE, family));
+    return (decode_inet_family_r(dbuf_thread_alloc(32), 32, family));
 }

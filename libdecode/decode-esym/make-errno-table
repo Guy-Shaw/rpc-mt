@@ -222,7 +222,7 @@ sub eval_definitions {
     }
     close $src_fh;
 
-    print "static char *${table_var}[] = {\n";
+    print "static const char *${table_var}[] = {\n";
     my $size = scalar(@table);
     my $count = 0;
     for (my $idx = 0; $idx < $size; ++$idx) {
