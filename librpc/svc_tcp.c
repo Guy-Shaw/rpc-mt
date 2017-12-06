@@ -201,7 +201,7 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
     }
 #endif /* DEBUG_BUFSIZE_8K */
 
-    tprintf("sock=%d, sendsize=%u, recvsize=%u\n", sock, sendsize, recvsize);
+    tprintf("sock=%d, sendsize=%u, recvsize=%u, sock.fd=%d\n", sock, sendsize, recvsize, sock);
     madesock = FALSE;
     len = sizeof(struct sockaddr_in);
 
@@ -441,6 +441,9 @@ svctcp_destroy(SVCXPRT *xprt)
     mtxprt = xprt_to_mtxprt(xprt);
     sock = xprt->xp_sock;
 
+    tprintf("xprt=%s, mtxprt=%s, fd=%u, prnt=%d, port=%d\n",
+	decode_addr(xprt), decode_addr(mtxprt), xprt->xp_sock,
+	mtxprt->mtxp_parent, xprt->xp_port);
     /*
      * Close socket if this xprt is not a clone.
      */
@@ -452,7 +455,7 @@ svctcp_destroy(SVCXPRT *xprt)
         rv = fstat(sock, &statb);
         err = errno;
         if (rv == 0) {
-            tprintf("close(sock=%d)\n", sock);
+            tprintf("close(sock.fd=%d)\n", sock);
             (void)close(sock);
         }
         else if (err == EBADF) {
@@ -514,7 +517,7 @@ readtcp_with_lock(char *xprtptr, char *buf, int ilen)
     sock = xprt->xp_sock;
     milliseconds = 35 * 1000;
     if (opt_svc_trace) {
-        tprintf("xprt=%s, sock=%d, ilen=%d\n", decode_addr(xprt), sock, ilen);
+        tprintf("xprt=%s, sock.fd=%d, ilen=%d\n", decode_addr(xprt), sock, ilen);
         eprintf("        peer=%s\n", decode_inet_peer(sock));
     }
 
@@ -544,7 +547,8 @@ readtcp_with_lock(char *xprtptr, char *buf, int ilen)
     len = (size_t)ilen;
     rdlen = read(sock, buf, len);
     err = errno;
-    tprintf("read(%d, %s, %zu) => %zd\n", sock, decode_addr(buf), len, rdlen);
+    tprintf("read(sock.fd=%d, %s, %zu) => %zd\n",
+	     sock, decode_addr(buf), len, rdlen);
     if (rdlen > 0) {
         return (ssize_to_int(rdlen));
     }
@@ -608,6 +612,8 @@ svctcp_stat(SVCXPRT *xprt)
     cd = (struct tcp_conn *)(xprt->xp_p1);
 
     if (cd->strm_stat == XPRT_DIED) {
+	tprintf("xprt=%s, %s, fd=%d\n",
+		decode_addr(xprt), "XPRT_DIED", xprt->xp_sock);
         return (XPRT_DIED);
     }
 
@@ -616,8 +622,12 @@ svctcp_stat(SVCXPRT *xprt)
     xdr_exit();
 
     if (!rv) {
+	tprintf("xprt=%s, %s, fd=%d\n",
+		decode_addr(xprt), "XPRT_MOREREQS", xprt->xp_sock);
         return (XPRT_MOREREQS);
     }
+    tprintf("xprt=%s, %s, fd=%d\n",
+	    decode_addr(xprt), "XPRT_IDLE", xprt->xp_sock);
     return (XPRT_IDLE);
 }
 
@@ -628,7 +638,8 @@ svctcp_recv(SVCXPRT *xprt, struct rpc_msg *msg)
     XDR *xdrs;
     int rv;
 
-    tprintf("xprt=%s, msg=%s\n", decode_addr(xprt), decode_addr(msg));
+    tprintf("xprt=%s, msg=%s, fd=%d\n",
+	    decode_addr(xprt), decode_addr(msg), xprt->xp_sock);
     xprt_progress_clrbits(xprt, XPRT_DONE_RECV);
     xdr_enter();
     xprt_lock(xprt);
@@ -671,7 +682,8 @@ svctcp_getargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
     XDR *xdrs;
     bool_t rv;
 
-    tprintf("xprt=%s, args_ptr=%s\n", decode_addr(xprt), decode_addr(args_ptr));
+    tprintf("xprt=%s, args_ptr=%s, fd=%d\n",
+	    decode_addr(xprt), decode_addr(args_ptr), xprt->xp_sock);
 
 #ifdef CONFIG_WAIT_FOR_RECV
     while ((xprt_get_progress(xprt) & XPRT_DONE_RECV) == 0) {
@@ -710,7 +722,8 @@ svctcp_freeargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
     XDR *xdrs;
     bool_t rv;
 
-    tprintf("xprt=%s, args_ptr=%s\n", decode_addr(xprt), decode_addr(args_ptr));
+    tprintf("xprt=%s, args_ptr=%s, fd=%d\n",
+	    decode_addr(xprt), decode_addr(args_ptr), xprt->xp_sock);
     xdr_enter();
     xprt_lock(xprt);
     cd = (struct tcp_conn *)(xprt->xp_p1);
@@ -736,7 +749,8 @@ svctcp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
     XDR *xdrs;
     bool_t stat;
 
-    tprintf("xprt=%s, msg=%s\n", decode_addr(xprt), decode_addr(msg));
+    tprintf("xprt=%s, msg=%s, fd=%d\n",
+	    decode_addr(xprt), decode_addr(msg), xprt->xp_sock);
     xdr_enter();
     xprt_lock(xprt);
     cd = (struct tcp_conn *)(xprt->xp_p1);

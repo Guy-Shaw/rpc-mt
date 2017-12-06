@@ -247,7 +247,7 @@ xprt_gc_mark(SVCXPRT *xprt)
     mtxprt = xprt_to_mtxprt(xprt);
     id = mtxprt->mtxp_id;
     pthread_mutex_lock(&xprtgc_lock);
-    tprintf("xprt=%s, id=%d\n", decode_addr(xprt), id);
+    tprintf("xprt=%s, id=%d, fd=%d\n", decode_addr(xprt), id, xprt->xp_sock);
     FD_SET(id, &xprtgc_fdset);
     ++xprtgc_mark_count;
     pthread_mutex_unlock(&xprtgc_lock);
@@ -269,7 +269,7 @@ xprt_gc_reap_one(int id)
         xprt = xports[id];
         mtxprt = xprt_to_mtxprt(xprt);
         if (mtxprt->mtxp_parent != NO_PARENT || mtxprt->mtxp_refcnt == 0) {
-            tprintf("xprt=%s\n", decode_addr(xprt));
+            tprintf("xprt=%s, fd=%d\n", decode_addr(xprt), xprt->xp_sock);
             SVC_DESTROY(xprt);
             count = 1;
         }
@@ -340,6 +340,7 @@ xprt_to_mtxprt(SVCXPRT *xprt)
     mtxprt_t *mtxprt;
 
     mtxprt = (mtxprt_t *)((char *)xprt + sizeof (SVCXPRT));
+    tprintf("xprt=%s, mtxprt=%s, fd=%u\n", decode_addr(xprt), decode_addr(mtxprt), xprt->xp_sock);
     if (mtxprt->mtxp_magic != MTXPRT_MAGIC) {
         tprintf("xprt=%s -- Bad magic, %x.\n",
             decode_addr(xprt), mtxprt->mtxp_magic);
@@ -366,8 +367,8 @@ xprt_lock(SVCXPRT *xprt)
 
     mtxprt = xprt_to_mtxprt(xprt);
     lockp = &mtxprt->mtxp_lock;
-    tprintf("xprt=%s, xprt_id=%d\n",
-        decode_addr(xprt), mtxprt->mtxp_id);
+    tprintf("xprt=%s, xprt_id=%d, fd=%d\n",
+        decode_addr(xprt), mtxprt->mtxp_id, xprt->xp_sock);
     ret = pthread_mutex_lock(lockp);
     if (ret != 0) {
         svc_die();
@@ -383,8 +384,8 @@ xprt_unlock(SVCXPRT *xprt)
 
     mtxprt = xprt_to_mtxprt(xprt);
     lockp = &mtxprt->mtxp_lock;
-    tprintf("xprt=%s, xprt_id=%d\n",
-        decode_addr(xprt), mtxprt->mtxp_id);
+    tprintf("xprt=%s, xprt_id=%d, fd=%d\n",
+        decode_addr(xprt), mtxprt->mtxp_id, xprt->xp_sock);
     ret = pthread_mutex_unlock(lockp);
     if (ret != 0) {
         svc_die();
@@ -409,6 +410,8 @@ xprt_set_busy(SVCXPRT *xprt, int value)
     pthread_mutex_lock(&(mtxprt->mtxp_progress_lock));
     mtxprt->mtxp_busy = value;
     pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
+    tprintf("xprt=%s, value=%d, fd=%d\n",
+	    decode_addr(xprt), value, xprt->xp_sock);
 }
 
 int
@@ -425,6 +428,8 @@ xprt_is_busy(SVCXPRT *xprt)
     pthread_mutex_lock(&(mtxprt->mtxp_progress_lock));
     busy = mtxprt->mtxp_busy;
     pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
+    tprintf("xprt=%s, busy=%d, fd=%d\n",
+	    decode_addr(xprt), busy, xprt->xp_sock);
     return (busy);
 }
 
@@ -449,6 +454,8 @@ xprt_get_progress(SVCXPRT *xprt)
     pthread_mutex_lock(&(mtxprt->mtxp_progress_lock));
     progress = mtxprt->mtxp_progress;
     pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
+    tprintf("xprt=%s, progress=%d, fd=%d\n",
+	    decode_addr(xprt), progress, xprt->xp_sock);
     return (progress);
 }
 
@@ -467,6 +474,8 @@ xprt_progress_setbits(SVCXPRT *xprt, int value)
     progress = mtxprt->mtxp_progress | value;
     mtxprt->mtxp_progress = progress;
     pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
+    tprintf("xprt=%s, progress=%d, fd=%d\n",
+	    decode_addr(xprt), progress, xprt->xp_sock);
     return (progress);
 }
 
@@ -481,6 +490,8 @@ xprt_progress_clrbits(SVCXPRT *xprt, int value)
     progress = mtxprt->mtxp_progress & ~value;
     mtxprt->mtxp_progress = progress;
     pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
+    tprintf("xprt=%s, progress=%d, fd=%d\n",
+	    decode_addr(xprt), progress, xprt->xp_sock);
     return (progress);
 }
 
@@ -504,9 +515,9 @@ show_xportv(SVCXPRT **xprtv, int size)
 
     count = 0;
     eprintf("\nxports[]:\n");
-    eprintf("   id    addr    prnt rcnt sock  port\n");
-    eprintf("----- ---------- ---- ---- ---- -----\n");
-    //       12345 1234567890 1234 1234 1234 12345
+    eprintf("   id    addr    prnt rcnt busy sock  port\n");
+    eprintf("----- ---------- ---- ---- ---- ---- -----\n");
+    //       12345 1234567890 1234 1234 1234 1234 12345
     for (id = 0; id < size; ++id) {
         xprt = xprtv[id];
         if (xprt != BAD_SVCXPRT_PTR) {
@@ -515,9 +526,10 @@ show_xportv(SVCXPRT **xprtv, int size)
             }
             else {
                 mtxprt = xprt_to_mtxprt_nocheck(xprt);
-                eprintf("%5u %10s %4d %4d %4d %5d\n",
+                eprintf("%5u %10s %4d %4d %4d %4d %5d\n",
                     id, decode_addr(xprt), mtxprt->mtxp_parent,
-                    mtxprt->mtxp_refcnt, xprt->xp_sock, xprt->xp_port);
+                    mtxprt->mtxp_refcnt, mtxprt->mtxp_busy,
+		    xprt->xp_sock, xprt->xp_port);
                 ++count;
                 if (count >= size) {
                     break;
@@ -1010,8 +1022,8 @@ xprt_register_with_lock(SVCXPRT *xprt)
         show_xports();
     }
 
-    tprintf("xprt=%s, xprt_id=%d, sock=%d, parent=%d\n",
-        decode_addr(xprt), xprt_id, sock, mtxprt->mtxp_parent);
+    tprintf("xprt=%s, xprt_id=%d, sock=%d, parent=%d, fd=%d\n",
+        decode_addr(xprt), xprt_id, sock, mtxprt->mtxp_parent, xprt->xp_sock);
 
     if (xprt_id >= xports_size) {
         tprintf("xprt_id >= xports_size (%d)\n", xports_size);
@@ -1208,7 +1220,8 @@ svc_is_mapped(rpcprog_t prog, rpcvers_t vers)
  * for this program number comes in.
  */
 bool_t
-svc_register(SVCXPRT *xprt, rpcprog_t prog, rpcvers_t vers, void (*dispatch) (struct svc_req *, SVCXPRT *), rpcproc_t protocol)
+svc_register(SVCXPRT *xprt, rpcprog_t prog, rpcvers_t vers,
+	     void (*dispatch) (struct svc_req *, SVCXPRT *), rpcproc_t protocol)
 {
     struct svc_callout *prev;
     struct svc_callout *s;
@@ -1542,6 +1555,8 @@ wait_on_progress(SVCXPRT *xprt, int mask, const char *desc)
 
     mtxprt = xprt_to_mtxprt(xprt);
     id = mtxprt->mtxp_id;
+    tprintf("xprt=%s, id=%d, %s, fd=%d\n",
+	    decode_addr(xprt), id, desc, xprt->xp_sock);
     for (;;) {
         int i;
 
@@ -1551,7 +1566,6 @@ wait_on_progress(SVCXPRT *xprt, int mask, const char *desc)
             }
             nanosleep(&ms, NULL);
         }
-        tprintf("xprt=%s, id=%d, waiting on %s\n", decode_addr(xprt), id, desc);
     }
 }
 
@@ -1667,12 +1681,15 @@ svc_getreq_common_rv(const int fd)
                             mtxprt->mtxp_progress = 0;
                         }
 			pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
-                        tprintf("> dispatch\n");
+                        tprintf("> dispatch: prog=%d proc=%d fd=%d\n",
+				(int)rqstp->rq_prog, (int)rqstp->rq_proc, fd);
                         (*s->sc_dispatch)(xprt_rqstp, worker_xprt);
-                        tprintf("< dispatch\n");
+                        tprintf("< dispatch: prog=%d proc=%d fd=%d\n",
+				(int)rqstp->rq_prog, (int)rqstp->rq_proc, fd);
                         if (mtmode) {
                             wait_on_progress(worker_xprt, XPRT_DONE_GETARGS, "XPRT_DONE_GETARGS");
-                        }
+			    tprintf("wait done: fd=%d\n", xprt->xp_sock);
+			}
                         else {
                             while (worker_return == 0) {
                                 const struct timespec ms = { 0, 1000000 };
@@ -1704,7 +1721,7 @@ svc_getreq_common_rv(const int fd)
         }
         tprintf("fall through to @label{call_done}\n");
       call_done:
-        tprintf("call_done:\n");
+        tprintf("call_done: fd=%d\n", xprt->xp_sock);
         if ((stat = SVC_STAT(worker_xprt)) == XPRT_DIED) {
             int sock;
 
@@ -1753,6 +1770,9 @@ svc_return(SVCXPRT *xprt)
     mtxprt_t *mtxprt;
 
     mtxprt = xprt_to_mtxprt(xprt);
+
+    tprintf("xprt=%s, fd=%d\n", decode_addr(xprt), xprt->xp_sock);
+
     if (mtmode) {
         if (mtxprt->mtxp_clone != NULL) {
             if (mtxprt->mtxp_parent == NO_PARENT) {
