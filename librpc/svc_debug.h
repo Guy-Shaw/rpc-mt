@@ -96,7 +96,7 @@ extern void svc_trace(unsigned int lvl);
 extern void svc_die(void);
 extern void svc_perror(int err, const char *s);
 
-extern int opt_svc_trace;
+extern unsigned int opt_svc_trace;
 
 extern int ssize_to_int(ssize_t ssz);
 

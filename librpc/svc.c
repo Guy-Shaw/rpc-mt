@@ -355,7 +355,7 @@ xprt_to_mtxprt(SVCXPRT *xprt)
     mtxprt = (mtxprt_t *)((char *)xprt + sizeof (SVCXPRT));
     tprintf(9, "xprt=%s, mtxprt=%s, fd=%u\n", decode_addr(xprt), decode_addr(mtxprt), xprt->xp_sock);
     if (mtxprt->mtxp_magic != MTXPRT_MAGIC) {
-        tprintf(0, "xprt=%s -- Bad magic, %x.\n",
+        teprintf("xprt=%s -- Bad magic, %x.\n",
             decode_addr(xprt), mtxprt->mtxp_magic);
         svc_die();
     }
@@ -1031,7 +1031,7 @@ xprt_register_with_lock(SVCXPRT *xprt)
         mtxprt->mtxp_id = xprt_id;
     }
 
-    if (opt_svc_trace) {
+    if (opt_svc_trace >= 1) {
         show_xports();
     }
 

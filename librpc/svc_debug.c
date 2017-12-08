@@ -30,7 +30,9 @@
 
 #include "svc_debug.h"
 
-int opt_svc_trace = 0;
+// Trace level from 0..9
+
+unsigned int opt_svc_trace = 0;
 
 void
 svc_trace(unsigned int lvl)
@@ -46,6 +48,6 @@ svc_die()
     sleep(1);
     fflush(stdout);
     fflush(stderr);
-    tprintf(0, "\n");
+    teprintf("\n");
     abort();
 }
