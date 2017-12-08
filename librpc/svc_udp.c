@@ -147,10 +147,10 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
     size_t bufsize;
 
     if (sock == RPC_ANYSOCK) {
-        tprintf("sock=RPC_ANYSOCK\n");
+        tprintf(2, "sock=RPC_ANYSOCK\n");
     }
     else {
-        tprintf("sock=%d\n", sock);
+        tprintf(2, "sock=%d\n", sock);
     }
 
     madesock = FALSE;
@@ -160,7 +160,7 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
             svc_perror(errno, "svcudp_create: socket creation problem");
             return ((SVCXPRT *)NULL);
         }
-        tprintf("socket() => %d\n", sock);
+        tprintf(2, "socket() => %d\n", sock);
         madesock = TRUE;
     }
 
@@ -470,7 +470,7 @@ svcudp_recv_with_id_lock(SVCXPRT *xprt, struct rpc_msg *msg)
      */
 
   again:
-    tprintf("@again:\n");
+    tprintf(2, "@again:\n");
     len = (socklen_t) sizeof(struct sockaddr_in);
 
 #ifdef IP_PKTINFO
@@ -512,7 +512,7 @@ svcudp_recv_with_id_lock(SVCXPRT *xprt, struct rpc_msg *msg)
         rlen = recvfrom(xprt->xp_sock, rpc_buffer(xprt), (int)su->su_iosz, 0, (struct sockaddr *)&(xprt->xp_raddr), &len);
     }
 #else
-    tprintf("recvfrom(%d, _, %d, 0, _, %d)\n",
+    tprintf(2, "recvfrom(%d, _, %d, 0, _, %d)\n",
         xprt->xp_sock, (int)su->su_iosz, *len);
     rlen = recvfrom(xprt->xp_sock, rpc_buffer(xprt), (int)su->su_iosz, 0, (struct sockaddr *)&(xprt->xp_raddr), &len);
 #endif
@@ -553,7 +553,7 @@ svcudp_recv(SVCXPRT *xprt, struct rpc_msg *msg)
     bool_t rv;
 
     xprt_progress_clrbits(xprt, XPRT_DONE_RECV);
-    tprintf("xprt=%s, msg=%s\n", decode_addr(xprt), decode_addr(msg));
+    tprintf(2, "xprt=%s, msg=%s\n", decode_addr(xprt), decode_addr(msg));
     rv = svcudp_recv_with_id_lock(xprt, msg);
     xprt_progress_setbits(xprt, XPRT_DONE_RECV);
     return (rv);
@@ -593,7 +593,7 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
     XDR_SETPOS(xdrs, 0);
     msg->rm_xid = su->su_xid;
     stat = xdr_replymsg(xdrs, msg);
-    tprintf("xdr_replymsg() => %d\n", stat);
+    tprintf(2, "xdr_replymsg() => %d\n", stat);
     if (stat) {
         size_t  slen;
         size_t  sent;
@@ -603,7 +603,7 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
         slen = (size_t)XDR_GETPOS(xdrs);
 #ifdef IP_PKTINFO
         mesgp = (struct msghdr *)&xprt->xp_pad[sizeof(struct iovec)];
-        tprintf("mesgp->msg_iovlen = %zu\n", mesgp->msg_iovlen);
+        tprintf(2, "mesgp->msg_iovlen = %zu\n", mesgp->msg_iovlen);
         if (mesgp->msg_iovlen) {
             iovp = (struct iovec *)&xprt->xp_pad[0];
             iovp->iov_base = rpc_buffer(xprt);
@@ -612,7 +612,7 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
             mesgp->msg_iovlen = 1;
             mesgp->msg_name = &(xprt->xp_raddr);
             mesgp->msg_namelen = (socklen_t) sizeof(struct sockaddr_in);
-            tprintf("sendmsg(%d, _, 0)\n", xprt->xp_sock);
+            tprintf(2, "sendmsg(%d, _, 0)\n", xprt->xp_sock);
             rsent = sendmsg(xprt->xp_sock, mesgp, 0);
         }
         else {
@@ -623,10 +623,10 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
 #endif
         if (rsent < 0) {
             err = errno;
-            tprintf("err=%d = '%s'\n", err, strerror(err));
+            tprintf(2, "err=%d = '%s'\n", err, strerror(err));
         }
         sent = (size_t)rsent;
-        tprintf("slen=%zu, sent=%zd\n", slen, sent);
+        tprintf(2, "slen=%zu, sent=%zd\n", slen, sent);
         if (sent == slen) {
             stat = TRUE;
             if (su->su_cache) {
@@ -645,7 +645,7 @@ svcudp_getargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
     XDR *xdrs;
     bool_t rv;
 
-    tprintf("xprt=%s, args_ptr=%s\n", decode_addr(xprt), decode_addr(args_ptr));
+    tprintf(2, "xprt=%s, args_ptr=%s\n", decode_addr(xprt), decode_addr(args_ptr));
     xprt_lock(xprt);
     xdrs = select_xprt_xdrs(xprt);
     rv = (*xdr_args) (xdrs, args_ptr);
@@ -678,7 +678,7 @@ svcudp_destroy(SVCXPRT *xprt)
 
     mtxprt = xprt_to_mtxprt(xprt);
     id = mtxprt->mtxp_id;
-    tprintf("xprt=%s, id=%d\n", decode_addr(xprt), id);
+    tprintf(2, "xprt=%s, id=%d\n", decode_addr(xprt), id);
     xprt_lock(xprt);
     /*
      * Close socket if this xprt is not a clone.
@@ -693,11 +693,11 @@ svcudp_destroy(SVCXPRT *xprt)
         rv = fstat(sock, &statb);
         err = errno;
         if (rv == 0) {
-            tprintf("close(sock=%d)\n", sock);
+            tprintf(2, "close(sock=%d)\n", sock);
             (void)close(sock);
         }
         else if (err == EBADF) {
-            tprintf("sock=%d -- already closed.\n", sock);
+            tprintf(2, "sock=%d -- already closed.\n", sock);
         }
         else {
             char errmsgbuf[64];
@@ -706,7 +706,7 @@ svcudp_destroy(SVCXPRT *xprt)
 
             (void) decode_esym_r(esymbuf, sizeof (esymbuf), err);
             ep = strerror_r(err, errmsgbuf, sizeof (errmsgbuf));
-            tprintf("sock=%d -- errno=%d=%s='%s'\n",
+            tprintf(2, "sock=%d -- errno=%d=%s='%s'\n",
             sock, err, esymbuf, ep);
         }
     }

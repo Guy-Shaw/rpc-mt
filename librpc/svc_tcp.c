@@ -201,13 +201,14 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
     }
 #endif /* DEBUG_BUFSIZE_8K */
 
-    tprintf("sock=%d, sendsize=%u, recvsize=%u, sock.fd=%d\n", sock, sendsize, recvsize, sock);
+    tprintf(2, "sock=%d, sendsize=%u, recvsize=%u, sock.fd=%d\n",
+        sock, sendsize, recvsize, sock);
     madesock = FALSE;
     len = sizeof(struct sockaddr_in);
 
     if (sock == RPC_ANYSOCK) {
         sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        tprintf("socket() => %d\n", sock);
+        tprintf(2, "socket() => %d\n", sock);
         if (sock < 0) {
             svc_perror(errno, "svc_tcp.c - tcp socket creation problem");
             return ((SVCXPRT *)NULL);
@@ -316,7 +317,7 @@ svctcp_create(int sock, u_int sendsize, u_int recvsize)
 SVCXPRT *
 svcfd_create(int fd, u_int sendsize, u_int recvsize)
 {
-    tprintf("fd=%d, sendsize=%u, recvsize=%u\n", fd, sendsize, recvsize);
+    tprintf(2, "fd=%d, sendsize=%u, recvsize=%u\n", fd, sendsize, recvsize);
     return (makefd_xprt(fd, sendsize, recvsize));
 }
 
@@ -327,7 +328,7 @@ makefd_xprt_with_lock(int fd, u_int sendsize, u_int recvsize)
     mtxprt_t *mtxprt;
     struct tcp_conn *cd;
 
-    tprintf("fd=%d, sendsize=%u, recvsize=%u\n", fd, sendsize, recvsize);
+    tprintf(2, "fd=%d, sendsize=%u, recvsize=%u\n", fd, sendsize, recvsize);
     xprt = alloc_xprt();
     cd = (struct tcp_conn *)guard_malloc(sizeof(struct tcp_conn));
     cd->strm_stat = XPRT_IDLE;
@@ -410,7 +411,7 @@ rendezvous_request(SVCXPRT *xprt, struct rpc_msg *errmsg)
     len = sizeof(struct sockaddr_in);
     sock = accept(xprt->xp_sock, (struct sockaddr *)&addr, &len);
     err = errno;
-    tprintf("accept() => %d\n", sock);
+    tprintf(2, "accept() => %d\n", sock);
     if (sock < 0) {
         if (err == EINTR)
             goto again;
@@ -441,9 +442,9 @@ svctcp_destroy(SVCXPRT *xprt)
     mtxprt = xprt_to_mtxprt(xprt);
     sock = xprt->xp_sock;
 
-    tprintf("xprt=%s, mtxprt=%s, fd=%u, prnt=%d, port=%d\n",
-	decode_addr(xprt), decode_addr(mtxprt), xprt->xp_sock,
-	mtxprt->mtxp_parent, xprt->xp_port);
+    tprintf(2, "xprt=%s, mtxprt=%s, fd=%u, prnt=%d, port=%d\n",
+        decode_addr(xprt), decode_addr(mtxprt), xprt->xp_sock,
+        mtxprt->mtxp_parent, xprt->xp_port);
     /*
      * Close socket if this xprt is not a clone.
      */
@@ -455,11 +456,11 @@ svctcp_destroy(SVCXPRT *xprt)
         rv = fstat(sock, &statb);
         err = errno;
         if (rv == 0) {
-            tprintf("close(sock.fd=%d)\n", sock);
+            tprintf(2, "close(sock.fd=%d)\n", sock);
             (void)close(sock);
         }
         else if (err == EBADF) {
-            tprintf("sock=%d -- already closed.\n", sock);
+            tprintf(2, "sock=%d -- already closed.\n", sock);
         }
         else {
             char errmsgbuf[64];
@@ -468,20 +469,20 @@ svctcp_destroy(SVCXPRT *xprt)
 
             (void) decode_esym_r(esymbuf, sizeof (esymbuf), err);
             ep = strerror_r(err, errmsgbuf, sizeof (errmsgbuf));
-            tprintf("sock=%d -- errno=%d=%s='%s'\n",
+            tprintf(2, "sock=%d -- errno=%d=%s='%s'\n",
                 sock, err, esymbuf, ep);
         }
     }
 
     if (xprt->xp_port != 0) {
         /* a rendezvouser socket */
-        tprintf("Socket type(%d): rendezvous\n", sock);
+        tprintf(2, "Socket type(%d): rendezvous\n", sock);
         xprt->xp_port = 0;
     } else {
         /* an actual connection socket */
         struct tcp_conn *cd;
 
-        tprintf("Socket type(%d): connection\n", sock);
+        tprintf(2, "Socket type(%d): connection\n", sock);
         cd = (struct tcp_conn *)xprt->xp_p1;
         XDR_DESTROY(&(cd->xdrs));
     }
@@ -512,13 +513,13 @@ readtcp_with_lock(char *xprtptr, char *buf, int ilen)
     int rv;
     int err;
 
-    tprintf("ilen=%d\n", ilen);
+    tprintf(2, "ilen=%d\n", ilen);
     xprt = (SVCXPRT *)xprtptr;
     sock = xprt->xp_sock;
     milliseconds = 35 * 1000;
     if (opt_svc_trace) {
-        tprintf("xprt=%s, sock.fd=%d, ilen=%d\n", decode_addr(xprt), sock, ilen);
-        eprintf("        peer=%s\n", decode_inet_peer(sock));
+        tprintf(2, "xprt=%s, sock.fd=%d, ilen=%d\n        peer=%s\n",
+            decode_addr(xprt), sock, ilen, decode_inet_peer(sock));
     }
 
     do {
@@ -547,14 +548,14 @@ readtcp_with_lock(char *xprtptr, char *buf, int ilen)
     len = (size_t)ilen;
     rdlen = read(sock, buf, len);
     err = errno;
-    tprintf("read(sock.fd=%d, %s, %zu) => %zd\n",
-	     sock, decode_addr(buf), len, rdlen);
+    tprintf(2, "read(sock.fd=%d, %s, %zu) => %zd\n",
+        sock, decode_addr(buf), len, rdlen);
     if (rdlen > 0) {
         return (ssize_to_int(rdlen));
     }
 
     if (rdlen < 0) {
-        tprintf("read(): errno=%d\n", err);
+        tprintf(2, "read(): errno=%d\n", err);
     }
 
   fatal_err:
@@ -589,7 +590,7 @@ writetcp(char *xprtptr, char *buf, int len)
 
     xprt = (SVCXPRT *)xprtptr;
     sock = xprt->xp_sock;
-    tprintf("xprt=%s, sock=%d\n", decode_addr(xprt), sock);
+    tprintf(2, "xprt=%s, sock=%d\n", decode_addr(xprt), sock);
     pthread_mutex_lock(&tcp_lock);
     for (cnt = len; cnt > 0; cnt -= wlen, buf += wlen) {
         wlen = write(sock, buf, cnt);
@@ -612,8 +613,8 @@ svctcp_stat(SVCXPRT *xprt)
     cd = (struct tcp_conn *)(xprt->xp_p1);
 
     if (cd->strm_stat == XPRT_DIED) {
-	tprintf("xprt=%s, %s, fd=%d\n",
-		decode_addr(xprt), "XPRT_DIED", xprt->xp_sock);
+        tprintf(2, "xprt=%s, %s, fd=%d\n",
+            decode_addr(xprt), "XPRT_DIED", xprt->xp_sock);
         return (XPRT_DIED);
     }
 
@@ -622,12 +623,12 @@ svctcp_stat(SVCXPRT *xprt)
     xdr_exit();
 
     if (!rv) {
-	tprintf("xprt=%s, %s, fd=%d\n",
-		decode_addr(xprt), "XPRT_MOREREQS", xprt->xp_sock);
+        tprintf(2, "xprt=%s, %s, fd=%d\n",
+            decode_addr(xprt), "XPRT_MOREREQS", xprt->xp_sock);
         return (XPRT_MOREREQS);
     }
-    tprintf("xprt=%s, %s, fd=%d\n",
-	    decode_addr(xprt), "XPRT_IDLE", xprt->xp_sock);
+    tprintf(2, "xprt=%s, %s, fd=%d\n",
+        decode_addr(xprt), "XPRT_IDLE", xprt->xp_sock);
     return (XPRT_IDLE);
 }
 
@@ -638,8 +639,8 @@ svctcp_recv(SVCXPRT *xprt, struct rpc_msg *msg)
     XDR *xdrs;
     int rv;
 
-    tprintf("xprt=%s, msg=%s, fd=%d\n",
-	    decode_addr(xprt), decode_addr(msg), xprt->xp_sock);
+    tprintf(2, "xprt=%s, msg=%s, fd=%d\n",
+        decode_addr(xprt), decode_addr(msg), xprt->xp_sock);
     xprt_progress_clrbits(xprt, XPRT_DONE_RECV);
     xdr_enter();
     xprt_lock(xprt);
@@ -682,8 +683,8 @@ svctcp_getargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
     XDR *xdrs;
     bool_t rv;
 
-    tprintf("xprt=%s, args_ptr=%s, fd=%d\n",
-	    decode_addr(xprt), decode_addr(args_ptr), xprt->xp_sock);
+    tprintf(2, "xprt=%s, args_ptr=%s, fd=%d\n",
+        decode_addr(xprt), decode_addr(args_ptr), xprt->xp_sock);
 
 #ifdef CONFIG_WAIT_FOR_RECV
     while ((xprt_get_progress(xprt) & XPRT_DONE_RECV) == 0) {
@@ -698,7 +699,7 @@ svctcp_getargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
     xdrs = &(cd->xdrs);
     xdrs->x_op = XDR_DECODE;
     rv = (*xdr_args) (xdrs, args_ptr);
-    tprintf("rv = %d\n", rv);
+    tprintf(2, "rv = %d\n", rv);
     xprt_unlock(xprt);
     xdr_exit();
 
@@ -722,8 +723,8 @@ svctcp_freeargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
     XDR *xdrs;
     bool_t rv;
 
-    tprintf("xprt=%s, args_ptr=%s, fd=%d\n",
-	    decode_addr(xprt), decode_addr(args_ptr), xprt->xp_sock);
+    tprintf(2, "xprt=%s, args_ptr=%s, fd=%d\n",
+        decode_addr(xprt), decode_addr(args_ptr), xprt->xp_sock);
     xdr_enter();
     xprt_lock(xprt);
     cd = (struct tcp_conn *)(xprt->xp_p1);
@@ -749,8 +750,8 @@ svctcp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
     XDR *xdrs;
     bool_t stat;
 
-    tprintf("xprt=%s, msg=%s, fd=%d\n",
-	    decode_addr(xprt), decode_addr(msg), xprt->xp_sock);
+    tprintf(2, "xprt=%s, msg=%s, fd=%d\n",
+        decode_addr(xprt), decode_addr(msg), xprt->xp_sock);
     xdr_enter();
     xprt_lock(xprt);
     cd = (struct tcp_conn *)(xprt->xp_p1);

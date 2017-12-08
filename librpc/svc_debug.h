@@ -86,8 +86,8 @@ extern pthread_mutex_t trace_lock;
         pthread_mutex_unlock(&trace_lock); \
     })
 
-#define tprintf(fmt, ...) \
-    ({ if (opt_svc_trace) { trace_printf(fmt, ## __VA_ARGS__); } })
+#define tprintf(lvl, fmt, ...) \
+    ({ if (opt_svc_trace >= lvl) { trace_printf(fmt, ## __VA_ARGS__); } })
 
 #define BAD_SVCXPRT_PTR ((SVCXPRT *)(-1))
 

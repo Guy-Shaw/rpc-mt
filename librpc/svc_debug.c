@@ -46,6 +46,6 @@ svc_die()
     sleep(1);
     fflush(stdout);
     fflush(stderr);
-    tprintf("\n");
+    tprintf(0, "\n");
     abort();
 }
