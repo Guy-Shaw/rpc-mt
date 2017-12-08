@@ -56,6 +56,19 @@
 #include "svc_debug.h"
 
 /*
+ * PUBLIC:
+ *   Part of the API.  Visible to the outside world.
+ *
+ * LIBRARY:
+ *   Not static.  Visible to other librpc files, but not part of the API.
+ *   That is, not meant to be visible to the outside world.
+ */
+
+#define PUBLIC
+#define LIBRARY
+#define UNUSED static
+
+/*
  * SFR := Server Flight Recorder
  *
  * Conditionally compile code to instrument all transactions related
@@ -187,7 +200,7 @@ struct svc_callout {
 
 static struct svc_callout *svc_head;
 
-void
+UNUSED void
 svc_backtrace(void)
 {
     void *bt_buf[64];
@@ -208,20 +221,20 @@ svc_backtrace(void)
     free(bt_strings);
 }
 
-void
+LIBRARY void
 xports_global_lock(void)
 {
     pthread_mutex_lock(&xports_lock);
     xports_owner = pthread_self();
 }
 
-void
+LIBRARY void
 xports_global_unlock(void)
 {
     pthread_mutex_unlock(&xports_lock);
 }
 
-void
+UNUSED void
 xports_snapshot()
 {
     pthread_mutex_lock(&xports_view_lock);
@@ -229,7 +242,7 @@ xports_snapshot()
     pthread_mutex_unlock(&xports_view_lock);
 }
 
-void
+static void
 xports_update_view(int id)
 {
     pthread_mutex_lock(&xports_view_lock);
@@ -238,7 +251,7 @@ xports_update_view(int id)
     pthread_mutex_unlock(&xports_view_lock);
 }
 
-void
+static void
 xprt_gc_mark(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
@@ -306,7 +319,7 @@ xprt_gc_reap_all(void)
  * Allocate memory for a @type{SVCXPRT}.  Allocate enough contiguous memory
  * for a "standard" SVCXPRT followed by the @type{mtxprt} extension.
  */
-SVCXPRT *
+LIBRARY SVCXPRT *
 alloc_xprt(void)
 {
     void *mem;
@@ -322,7 +335,7 @@ alloc_xprt(void)
  * @type{mtxprt}.  Don't do any checking, because this is a new SVCXPRT,
  * under construction.
  */
-mtxprt_t *
+LIBRARY mtxprt_t *
 xprt_to_mtxprt_nocheck(SVCXPRT *xprt)
 {
     return ((mtxprt_t *)((char *)xprt + sizeof (SVCXPRT)));
@@ -334,7 +347,7 @@ xprt_to_mtxprt_nocheck(SVCXPRT *xprt)
  * constructed @type{SVCXPRT}, including the @type{mtxprt}.
  *
  */
-mtxprt_t *
+LIBRARY mtxprt_t *
 xprt_to_mtxprt(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
@@ -358,7 +371,7 @@ xprt_to_mtxprt(SVCXPRT *xprt)
  * by one worker thread.
  */
 
-void
+LIBRARY void
 xprt_lock(SVCXPRT *xprt)
 {
     mtxprt_t        *mtxprt;
@@ -375,7 +388,7 @@ xprt_lock(SVCXPRT *xprt)
     }
 }
 
-void
+LIBRARY void
 xprt_unlock(SVCXPRT *xprt)
 {
     mtxprt_t        *mtxprt;
@@ -392,7 +405,7 @@ xprt_unlock(SVCXPRT *xprt)
     }
 }
 
-int
+UNUSED int
 xprt_is_locked(SVCXPRT *xprt)
 {
     mtxprt_t        *mtxprt;
@@ -401,7 +414,7 @@ xprt_is_locked(SVCXPRT *xprt)
     return (pthread_mutex_is_locked(&(mtxprt->mtxp_lock)));
 }
 
-void
+LIBRARY void
 xprt_set_busy(SVCXPRT *xprt, int value)
 {
     mtxprt_t *mtxprt;
@@ -414,7 +427,7 @@ xprt_set_busy(SVCXPRT *xprt, int value)
 	    decode_addr(xprt), value, xprt->xp_sock);
 }
 
-int
+static int
 xprt_is_busy(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
@@ -433,7 +446,7 @@ xprt_is_busy(SVCXPRT *xprt)
     return (busy);
 }
 
-int
+LIBRARY int
 fd_is_busy(int fd)
 {
     return (xprt_is_busy(sock_xports[fd]));
@@ -444,7 +457,7 @@ fd_is_busy(int fd)
  * Always use this method to get the value.  Never read the value directly.
  */
 
-int
+static int
 xprt_get_progress(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
@@ -463,7 +476,7 @@ xprt_get_progress(SVCXPRT *xprt)
  * Return new value of progress.
  */
 
-int
+LIBRARY int
 xprt_progress_setbits(SVCXPRT *xprt, int value)
 {
     mtxprt_t *mtxprt;
@@ -479,7 +492,7 @@ xprt_progress_setbits(SVCXPRT *xprt, int value)
     return (progress);
 }
 
-int
+LIBRARY int
 xprt_progress_clrbits(SVCXPRT *xprt, int value)
 {
     mtxprt_t *mtxprt;
@@ -495,7 +508,7 @@ xprt_progress_clrbits(SVCXPRT *xprt, int value)
     return (progress);
 }
 
-void
+LIBRARY void
 show_xportv(SVCXPRT **xprtv, int size)
 {
     SVCXPRT *xprt;
@@ -540,7 +553,7 @@ show_xportv(SVCXPRT **xprtv, int size)
     eprintf("\n");
 }
 
-void
+LIBRARY void
 show_xports(void)
 {
     pthread_mutex_lock(&xports_view_lock);
@@ -548,7 +561,7 @@ show_xports(void)
     pthread_mutex_unlock(&xports_view_lock);
 }
 
-void
+static void
 show_xports_pollfd(void)
 {
     struct pollfd *pollfdv;
@@ -570,7 +583,7 @@ show_xports_pollfd(void)
     }
 }
 
-void
+static void
 show_xports_fdset(void)
 {
     int fd;
@@ -599,7 +612,7 @@ show_xports_fdset(void)
  *
  */
 
-int
+static int
 is_valid_svcxprt(SVCXPRT *xprt)
 {
     if (xprt == (SVCXPRT *)NULL) {
@@ -620,7 +633,7 @@ is_valid_svcxprt(SVCXPRT *xprt)
  * that might be handy, and call svc_die().
  *
  */
-void
+static void
 check_svcxprt(SVCXPRT *xprt)
 {
     if (!is_valid_svcxprt(xprt)) {
@@ -639,7 +652,7 @@ check_svcxprt(SVCXPRT *xprt)
  * functions that do any checking would call @function{check_svcxprt_exists}.
  *
  */
-void
+static void
 check_svcxprt_exists(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
@@ -662,7 +675,7 @@ check_svcxprt_exists(SVCXPRT *xprt)
     }
 }
 
-int
+static int
 check_xports_duplicates(void)
 {
     SVCXPRT *xprt1, *xprt2;
@@ -705,7 +718,7 @@ check_xports_duplicates(void)
  *
  */
 
-int
+static int
 check_xports(void)
 {
     SVCXPRT *xprt;
@@ -833,7 +846,7 @@ create_xports(void)
     xports_max_pollfd = 0;
 }
 
-void
+LIBRARY void
 xports_init(void)
 {
     if (xports == NULL) {
@@ -841,7 +854,7 @@ xports_init(void)
     }
 }
 
-void
+LIBRARY void
 xports_free(void)
 {
     if (xports != NULL) {
@@ -863,7 +876,7 @@ init_read_pollfd(struct pollfd *pollfdv, int slot, int fd)
     pollfdv[slot].revents = 0;
 }
 
-int
+static int
 init_pollfd(int fd)
 {
     struct pollfd *pollfdv;
@@ -992,7 +1005,7 @@ socket_xprt_is_available(SVCXPRT *sxprt)
  *
  */
 
-int
+LIBRARY int
 xprt_register_with_lock(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
@@ -1063,7 +1076,7 @@ xprt_register_with_lock(SVCXPRT *xprt)
 /*
  * Activate a transport handle.
  */
-void
+LIBRARY void
 xprt_register(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
@@ -1104,7 +1117,7 @@ pollfd_remove(struct pollfd *pollfdv, nfds_t pollfdsz, int sock)
     }
 }
 
-void
+static void
 unregister_id(int id)
 {
     if (!(id >= 0 && id < xports_size)) {
@@ -1127,7 +1140,7 @@ unregister_id(int id)
  * De-activate a transport handle.
  */
 
-int
+LIBRARY int
 xprt_unregister_with_lock(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
@@ -1167,7 +1180,7 @@ xprt_unregister_with_lock(SVCXPRT *xprt)
     return (0);
 }
 
-void
+LIBRARY void
 xprt_unregister(SVCXPRT *xprt)
 {
     int err;
@@ -1219,7 +1232,7 @@ svc_is_mapped(rpcprog_t prog, rpcvers_t vers)
  * The dispatch routine will be called when a rpc request
  * for this program number comes in.
  */
-bool_t
+PUBLIC bool_t
 svc_register(SVCXPRT *xprt, rpcprog_t prog, rpcvers_t vers,
 	     void (*dispatch) (struct svc_req *, SVCXPRT *), rpcproc_t protocol)
 {
@@ -1257,7 +1270,7 @@ svc_register(SVCXPRT *xprt, rpcprog_t prog, rpcvers_t vers,
 /*
  * Remove a service program from the callout list.
  */
-void
+PUBLIC void
 svc_unregister(rpcprog_t prog, rpcvers_t vers)
 {
     struct svc_callout *prev;
@@ -1286,7 +1299,7 @@ svc_unregister(rpcprog_t prog, rpcvers_t vers)
 /*
  * Send a reply to an rpc request
  */
-bool_t
+PUBLIC bool_t
 svc_sendreply(SVCXPRT *xprt, xdrproc_t xdr_results, caddr_t xdr_location)
 {
     struct rpc_msg rply;
@@ -1304,7 +1317,7 @@ svc_sendreply(SVCXPRT *xprt, xdrproc_t xdr_results, caddr_t xdr_location)
 /*
  * No procedure error reply
  */
-void
+PUBLIC void
 svcerr_noproc(SVCXPRT *xprt)
 {
     struct rpc_msg rply;
@@ -1320,7 +1333,7 @@ svcerr_noproc(SVCXPRT *xprt)
 /*
  * Can't decode args error reply
  */
-void
+PUBLIC void
 svcerr_decode(SVCXPRT *xprt)
 {
     struct rpc_msg rply;
@@ -1336,7 +1349,7 @@ svcerr_decode(SVCXPRT *xprt)
 /*
  * Some system error
  */
-void
+PUBLIC void
 svcerr_systemerr(SVCXPRT *xprt)
 {
     struct rpc_msg rply;
@@ -1352,7 +1365,7 @@ svcerr_systemerr(SVCXPRT *xprt)
 /*
  * Authentication error reply
  */
-void
+LIBRARY void
 svcerr_auth(SVCXPRT *xprt, enum auth_stat why)
 {
     struct rpc_msg rply;
@@ -1369,7 +1382,7 @@ svcerr_auth(SVCXPRT *xprt, enum auth_stat why)
 /*
  * Auth too weak error reply
  */
-void
+LIBRARY void
 svcerr_weakauth(SVCXPRT *xprt)
 {
     check_svcxprt_exists(xprt);
@@ -1379,7 +1392,7 @@ svcerr_weakauth(SVCXPRT *xprt)
 /*
  * Program unavailable error reply
  */
-void
+LIBRARY void
 svcerr_noprog(SVCXPRT *xprt)
 {
     struct rpc_msg rply;
@@ -1395,7 +1408,7 @@ svcerr_noprog(SVCXPRT *xprt)
 /*
  * Program version mismatch error reply
  */
-void
+LIBRARY void
 svcerr_progvers(SVCXPRT *xprt, rpcvers_t low_vers, rpcvers_t high_vers)
 {
     struct rpc_msg rply;
@@ -1428,7 +1441,7 @@ svcerr_progvers(SVCXPRT *xprt, rpcvers_t low_vers, rpcvers_t high_vers)
  * is mallocated in kernel land.
  */
 
-void
+PUBLIC void
 svc_getreq(int rdfds)
 {
     fd_set readfds;
@@ -1444,7 +1457,7 @@ svc_getreq(int rdfds)
     svc_getreqset(&readfds);
 }
 
-void
+PUBLIC void
 svc_getreqset(fd_set *readfds)
 {
     __fd_mask mask;
@@ -1477,7 +1490,7 @@ svc_getreqset(fd_set *readfds)
     }
 }
 
-void
+LIBRARY void
 svc_getreq_poll_mt(struct pollfd *pfdp, nfds_t npoll, int pollretval)
 {
     int fds_found;
@@ -1546,7 +1559,7 @@ svc_xprt_clone(SVCXPRT *xprt)
  * 5 seconds.
  */
 
-void
+static void
 wait_on_progress(SVCXPRT *xprt, int mask, const char *desc)
 {
     const struct timespec ms = { 0, 1000000 };
@@ -1569,7 +1582,7 @@ wait_on_progress(SVCXPRT *xprt, int mask, const char *desc)
     }
 }
 
-int
+LIBRARY int
 svc_getreq_common_rv(const int fd)
 {
     enum xprt_stat stat;
@@ -1742,7 +1755,7 @@ svc_getreq_common_rv(const int fd)
     return (0);
 }
 
-void
+PUBLIC void
 svc_getreq_common(const int fd)
 {
     int err;
@@ -1764,7 +1777,7 @@ svc_getreq_common(const int fd)
  *
  */
 
-void
+PUBLIC void
 svc_return(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
@@ -1791,7 +1804,7 @@ svc_return(SVCXPRT *xprt)
 
 #ifdef _RPC_THREAD_SAFE_
 
-void
+UNUSED void
 __rpc_thread_svc_cleanup(void)
 {
     struct svc_callout *svcp;
@@ -1802,3 +1815,16 @@ __rpc_thread_svc_cleanup(void)
 }
 
 #endif /* _RPC_THREAD_SAFE_ */
+
+#define UNUSED_FUNCTION(fname) (void)(fp = &fname);
+
+LIBRARY void
+ref_unused(void)
+{
+    void *fp;
+
+    UNUSED_FUNCTION(__rpc_thread_svc_cleanup);
+    UNUSED_FUNCTION(xprt_is_locked);
+    UNUSED_FUNCTION(xports_snapshot);
+    UNUSED_FUNCTION(svc_backtrace);
+}
