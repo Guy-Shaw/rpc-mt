@@ -30,7 +30,7 @@
 
 #include "svc_debug.h"
 
-int opt_svc_trace = 1;
+int opt_svc_trace = 0;
 
 void
 svc_trace(void)
