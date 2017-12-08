@@ -44,7 +44,7 @@ The files of interest that have been replaced are:
 In practice, this has been easier to manage.  RPC-MT can be built and deployed
 in minutes, because there is no need to download, modify and rebuild Glibc.
 RPC-MT has been run on several Linux distributions, including Ubuntu, CentOS,
-OpenSUSE and Fedora.
+OpenSUSE, Fedora and RedHat Enterprise Linux (RHEL).
 
 Portability
 ===========
