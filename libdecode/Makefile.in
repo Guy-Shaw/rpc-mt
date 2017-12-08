@@ -16,6 +16,7 @@ SRC_C := \
     decode-errno.c \
     decode-int.c \
     strict-conv.c \
+    sisfx.c \
     util.c \
     ###
 
