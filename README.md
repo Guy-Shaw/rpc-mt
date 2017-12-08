@@ -36,10 +36,9 @@ code in Glibc, such as XDR, is thread safe and is still used.
 
 The files of interest that have been replaced are:
 
-`    svc.c`
-`    svc_run.c`
-`    svc_tcp.c`
-`    svc_udp.c`
+```
+    svc.c  svc_run.c  svc_tcp.c  svc_udp.c
+```
 
 In practice, this has been easier to manage.  RPC-MT can be built and deployed
 in minutes, because there is no need to download, modify and rebuild Glibc.
@@ -48,8 +47,11 @@ OpenSUSE, Fedora and RedHat Enterprise Linux (RHEL).
 
 Build
 =====
-`    ( cd librpc && ./configure && make )`
-`    ( cd libdecode && ./configure && make )`
+```
+    ( cd librpc && ./configure && make )
+
+    ( cd libdecode && ./configure && make )
+```
 
 Portability
 ===========
