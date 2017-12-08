@@ -46,6 +46,11 @@ in minutes, because there is no need to download, modify and rebuild Glibc.
 RPC-MT has been run on several Linux distributions, including Ubuntu, CentOS,
 OpenSUSE, Fedora and RedHat Enterprise Linux (RHEL).
 
+Build
+=====
+`    ( cd librpc && ./configure && make )`
+`    ( cd libdecode && ./configure && make )`
+
 Portability
 ===========
 Since RPC-MT is Linux-specific and is derived from Glibc code, it is not
@@ -102,3 +107,9 @@ RPC-MT inherits the license from that code.  That is probably the kind of
 license I would want to distribute my code under, anyway.  The preamble
 comment section at the top of each source code file is the Oracle license
 comment, intact, followed by my additional comments.
+
+
+-- Guy Shaw
+
+   gshaw@acm.org
+
