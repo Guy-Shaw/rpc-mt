@@ -1,0 +1,21 @@
+.gitignore
+*.o
+*.a
+*.so
+*.so.[0-9]
+*.so.[0-9].[0-9]
+*.so.[0-9].[0-9].[0-9]
+adm
+RCS
+OLD
+*/RCS
+*/OLD
+*/config.log
+*/config.status
+
+# Generated
+libdecode/decode-esym.c
+
+libdecode/Makefile
+librpc/Makefile
+
