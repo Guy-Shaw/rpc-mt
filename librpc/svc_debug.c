@@ -33,9 +33,9 @@
 int opt_svc_trace = 0;
 
 void
-svc_trace(void)
+svc_trace(unsigned int lvl)
 {
-    opt_svc_trace = 1;
+    opt_svc_trace = lvl;
 }
 
 void

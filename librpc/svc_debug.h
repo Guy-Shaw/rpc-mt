@@ -92,7 +92,7 @@ extern pthread_mutex_t trace_lock;
 #define BAD_SVCXPRT_PTR ((SVCXPRT *)(-1))
 
 extern void show_xports(void);
-extern void svc_trace(void);
+extern void svc_trace(unsigned int lvl);
 extern void svc_die(void);
 extern void svc_perror(int err, const char *s);
 
