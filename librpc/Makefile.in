@@ -27,7 +27,7 @@ hfiles: $(SRC_C:%.c=%.H)
 	$(CC) -H -c $(CFLAGS) $< >$@ 2>&1
 
 mcc:
-	mcc --mcc:all --mcc:header $(CFLAGS) -c -- $(SRC_C)
+	mcc --mcc:header $(CFLAGS) -c -- $(SRC_C)
 
 
 $(OBJ): svc_mtxprt.h svc_debug.h
