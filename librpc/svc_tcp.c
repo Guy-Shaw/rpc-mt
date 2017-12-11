@@ -442,7 +442,7 @@ svctcp_destroy(SVCXPRT *xprt)
     mtxprt = xprt_to_mtxprt(xprt);
     sock = xprt->xp_sock;
 
-    tprintf(2, "xprt=%s, mtxprt=%s, fd=%u, prnt=%d, port=%d\n",
+    tprintf(2, "xprt=%s, mtxprt=%s, fd=%u, prnt=%zu, port=%d\n",
         decode_addr(xprt), decode_addr(mtxprt), xprt->xp_sock,
         mtxprt->mtxp_parent, xprt->xp_port);
     /*

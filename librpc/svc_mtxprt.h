@@ -6,10 +6,10 @@
 #include <pthread.h>     // Import pthread_t, pthread_mutex_t
 #include <rpc/xdr.h>     // Import XDR
 
+#define XPRT_ID_INVALID ((size_t)(-1))
+#define NO_PARENT ((size_t)(-1))
+
 #define RQCRED_SIZE 400 /* This size is excessive */
-
-#define NO_PARENT (-1)
-
 
 #define XPRT_DONE_RECV    0x02
 #define XPRT_DONE_GETARGS 0x04
@@ -90,11 +90,11 @@ typedef void (*update_func_t)(SVCXPRT *, SVCXPRT *);
 
 struct mtxprt {
     int              mtxp_magic;
-    int              mtxp_id;
+    size_t           mtxp_id;
     pthread_t        mtxp_creator;
     pthread_mutex_t  mtxp_lock;
     size_t           mtxp_bufsz;
-    int              mtxp_parent;
+    size_t           mtxp_parent;
     int              mtxp_refcnt;
     int              mtxp_fsck_refcnt;
     int              mtxp_busy;

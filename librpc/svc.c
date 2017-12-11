@@ -43,8 +43,10 @@
  *
  */
 
+#include <stdbool.h>
 #include <errno.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <rpc/rpc.h>
 #include <rpc/svc.h>
 #include <rpc/pmap_clnt.h>
@@ -56,17 +58,40 @@
 #include "svc_debug.h"
 
 /*
+ * Extended scope declarations.
+ *
+ * The C programming language does not distinguish between:
+ *   1) functions or data that is external because it is part of the
+ *      ABI and is meant to be visible to the outside world, and
+ *
+ *   2) functions or data that need to be declared extern (not static)
+ *      only because it needs to be visible to other modules
+ *      (C source files) within a library that implements the API,
+ *      but ought not to be visible outside the library.
+ *
+ * We annotate extern function and/or data with PUBLIC or LIBRARY.
+ * This does not enforce anything, but can be used by a linker script
+ * to hide symbols (at least in a shared library).
+ *
  * PUBLIC:
  *   Part of the API.  Visible to the outside world.
  *
  * LIBRARY:
  *   Not static.  Visible to other librpc files, but not part of the API.
  *   That is, not meant to be visible to the outside world.
+ *
+ * UNUSED:
+ *   static functions that we do not want to remove, at least not yet.
+ *   The function, ref_unused(), keeps the compiler quiet when all
+ *   warnings are turned on.
+ *   It also acts as a quick visual way to keep track of unused functions.
+ *   
  */
 
 #define PUBLIC
 #define LIBRARY
 #define UNUSED static
+
 
 /*
  * SFR := Server Flight Recorder
@@ -116,15 +141,15 @@ typedef struct sock_sfr sock_sfr_t;
 
 static sock_sfr_t * sock_sfr;
 
-#endif
+#endif /* SFR_SOCKET */
 
 static fd_set xports_fdset;
 static fd_set xprtgc_fdset;
-static int xports_size;
-static int xports_count;
-static int xports_view_count;
+static size_t xports_size;
+static size_t xports_count;
+static size_t xports_view_count;
 static unsigned long long xports_version;
-static int xprtgc_mark_count;
+static size_t xprtgc_mark_count;
 
 struct pollfd *xports_pollfd;
 nfds_t xports_pollfd_size;
@@ -136,7 +161,7 @@ pthread_mutex_t io_lock = PTHREAD_MUTEX_INITIALIZER;
  * @var{xports_lock} protects all operations that modify
  * @var{xports} and/or @var{sock_xports}.
  *
- * Each @type{SVCXPRT} contains a lock to protects its contents,
+ * Each @type{SVCXPRT} contains a lock to protect its contents,
  * but the "global" @var{xports_lock} is required to add or remove
  * @type{SVCXPRT} data structures (including cloned @type{SVCXPRT}s).
  */
@@ -180,6 +205,30 @@ int mtmode = 1;
 int failfast = 1;
 
 int worker_return;
+
+
+
+// Low-level functions to validate xport IDs, xport status, etc.
+
+static inline bool
+id_is_valid(size_t id)
+{
+    return (id < xports_size);
+}
+
+static inline bool
+xprt_stat_is_valid(enum xprt_stat xrv)
+{
+    return (xrv == XPRT_DIED || xrv == XPRT_MOREREQS || xrv == XPRT_IDLE);
+}
+
+
+static bool
+fd_is_open(int fd)
+{
+    return (fcntl(fd, F_GETFD) != -1 || errno != EBADF);
+}
+
 
 #define NULL_SVC ((struct svc_callout *)0)
 
@@ -243,7 +292,7 @@ xports_snapshot()
 }
 
 static void
-xports_update_view(int id)
+xports_update_view(size_t id)
 {
     pthread_mutex_lock(&xports_view_lock);
     xports_view[id] = xports[id];
@@ -251,34 +300,67 @@ xports_update_view(int id)
     pthread_mutex_unlock(&xports_view_lock);
 }
 
+
+/*
+ * For all tcp sockets that are supposed to be busy,
+ * check to see if the socket fd is really open.
+ * If not, then reap then xprt for than socket_fd.
+ */
+
+static void
+scan_busy(void)
+{
+    size_t id;
+
+    for (id = 0; id < xports_size; ++id) {
+        SVCXPRT *xprt;
+        mtxprt_t *mtxprt;
+        int fd;
+
+        xprt = xports[id];
+        if (xprt == BAD_SVCXPRT_PTR) {
+            continue;
+        }
+        mtxprt = xprt_to_mtxprt(xprt);
+        fd = xprt->xp_sock;
+        if (mtxprt->mtxp_busy && !fd_is_open(fd)) {
+            eprintf("*** ERROR *** xprt %zu is busy\n"
+                   " but its file descriptor, %d, is not open.\n",
+                   id, fd);
+            svc_die();
+        }
+    }
+}
+
 static void
 xprt_gc_mark(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
-    int id;
+    size_t id;
 
     mtxprt = xprt_to_mtxprt(xprt);
     id = mtxprt->mtxp_id;
     pthread_mutex_lock(&xprtgc_lock);
-    tprintf(2, "xprt=%s, id=%d, fd=%d\n", decode_addr(xprt), id, xprt->xp_sock);
-    FD_SET(id, &xprtgc_fdset);
+    tprintf(2, "xprt=%s, id=%zu, fd=%d\n",
+        decode_addr(xprt), id, xprt->xp_sock);
+    FD_SET((int)id, &xprtgc_fdset);
     ++xprtgc_mark_count;
     pthread_mutex_unlock(&xprtgc_lock);
 }
 
-static int
-xprt_gc_reap_one(int id)
+static size_t
+xprt_gc_reap_one(size_t id)
 {
     SVCXPRT *xprt;
     mtxprt_t *mtxprt;
-    int count = 0;
+    size_t count = 0;
 
-    if (!FD_ISSET(id, &xprtgc_fdset)) {
+    if (!FD_ISSET((int)id, &xprtgc_fdset)) {
         return (0);
     }
 
     pthread_mutex_lock(&xprtgc_lock);
-    if (FD_ISSET(id, &xprtgc_fdset)) {
+    if (FD_ISSET((int)id, &xprtgc_fdset)) {
         xprt = xports[id];
         mtxprt = xprt_to_mtxprt(xprt);
         if (mtxprt->mtxp_parent != NO_PARENT || mtxprt->mtxp_refcnt == 0) {
@@ -286,7 +368,7 @@ xprt_gc_reap_one(int id)
             SVC_DESTROY(xprt);
             count = 1;
         }
-        FD_CLR(id, &xprtgc_fdset);
+        FD_CLR((int)id, &xprtgc_fdset);
         --xprtgc_mark_count;
     }
     pthread_mutex_unlock(&xprtgc_lock);
@@ -299,19 +381,22 @@ xprt_gc_reap_one(int id)
  * and then marked for garbage collection.
  */
 
-static int
+int
 xprt_gc_reap_all(void)
 {
-    int id;
-    int count;
+    size_t id;
+    size_t count;
 
-    tprintf(2, "%d SVCXPRT to be destroyed\n", xprtgc_mark_count);
+    tprintf(2, "%zu SVCXPRT to be destroyed\n", xprtgc_mark_count);
     count = 0;
     for (id = 0; id < xports_size && xprtgc_mark_count != 0; ++id) {
-        if (FD_ISSET(id, &xprtgc_fdset)) {
+        if (FD_ISSET((int)id, &xprtgc_fdset)) {
             count += xprt_gc_reap_one(id);
         }
     }
+
+    scan_busy();
+
     return (count);
 }
 
@@ -380,7 +465,7 @@ xprt_lock(SVCXPRT *xprt)
 
     mtxprt = xprt_to_mtxprt(xprt);
     lockp = &mtxprt->mtxp_lock;
-    tprintf(2, "xprt=%s, xprt_id=%d, fd=%d\n",
+    tprintf(2, "xprt=%s, xprt_id=%zu, fd=%d\n",
         decode_addr(xprt), mtxprt->mtxp_id, xprt->xp_sock);
     ret = pthread_mutex_lock(lockp);
     if (ret != 0) {
@@ -397,7 +482,7 @@ xprt_unlock(SVCXPRT *xprt)
 
     mtxprt = xprt_to_mtxprt(xprt);
     lockp = &mtxprt->mtxp_lock;
-    tprintf(2, "xprt=%s, xprt_id=%d, fd=%d\n",
+    tprintf(2, "xprt=%s, xprt_id=%zu, fd=%d\n",
         decode_addr(xprt), mtxprt->mtxp_id, xprt->xp_sock);
     ret = pthread_mutex_unlock(lockp);
     if (ret != 0) {
@@ -508,13 +593,45 @@ xprt_progress_clrbits(SVCXPRT *xprt, int value)
     return (progress);
 }
 
-LIBRARY void
-show_xportv(SVCXPRT **xprtv, int size)
+static void
+show_xport(SVCXPRT **xprtv, size_t id)
 {
     SVCXPRT *xprt;
     mtxprt_t *mtxprt;
-    int count;
-    int id;
+    size_t parent_id;
+
+    xprt = xprtv[id];
+    if (xprt == BAD_SVCXPRT_PTR) {
+        return;
+    }
+
+    if (xprt == (SVCXPRT *)0) {
+        eprintf("%5zu NULL\n", id);
+        return;
+    }
+
+    mtxprt = xprt_to_mtxprt_nocheck(xprt);
+    eprintf("%5zu %14s ", id, decode_addr(xprt));
+    parent_id = mtxprt->mtxp_parent;
+    if (parent_id == XPRT_ID_INVALID) {
+        eprintf(" n/a ");
+    }
+    else {
+        eprintf("%4zu ", parent_id);
+    }
+    eprintf("%4d %4d %4d %5d",
+        mtxprt->mtxp_refcnt,
+        mtxprt->mtxp_busy,
+        xprt->xp_sock,
+        xprt->xp_port);
+    eprintf(" %s", FD_ISSET((int)id, &xprtgc_fdset) ? "+gc" : "-gc");
+    eprintf("\n");
+}
+
+LIBRARY void
+show_xportv(SVCXPRT **xprtv, size_t size)
+{
+    size_t id;
 
     if (xprtv == NULL) {
         eprintf("\nxprtv == NULL\n");
@@ -526,29 +643,12 @@ show_xportv(SVCXPRT **xprtv, int size)
         return;
     }
 
-    count = 0;
     eprintf("\nxports[]:\n");
     eprintf("   id    addr        prnt rcnt busy sock  port\n");
     eprintf("----- -------------- ---- ---- ---- ---- -----\n");
     //       12345 12345678901234 1234 1234 1234 1234 12345
     for (id = 0; id < size; ++id) {
-        xprt = xprtv[id];
-        if (xprt != BAD_SVCXPRT_PTR) {
-            if (xprt == (SVCXPRT *)0) {
-                eprintf("%5u NULL\n", id);
-            }
-            else {
-                mtxprt = xprt_to_mtxprt_nocheck(xprt);
-                eprintf("%5u %14s %4d %4d %4d %4d %5d\n",
-                    id, decode_addr(xprt), mtxprt->mtxp_parent,
-                    mtxprt->mtxp_refcnt, mtxprt->mtxp_busy,
-		    xprt->xp_sock, xprt->xp_port);
-                ++count;
-                if (count >= size) {
-                    break;
-                }
-            }
-        }
+        show_xport(xprtv, id);
     }
     eprintf("\n");
 }
@@ -586,15 +686,15 @@ show_xports_pollfd(void)
 static void
 show_xports_fdset(void)
 {
-    int fd;
-    int count;
+    size_t fd;
+    size_t count;
 
     eprintf("\n");
     eprintf("xports_fdset:\n");
     count = 0;
     for (fd = 0; fd < xports_size; ++fd) {
-        if (FD_ISSET(fd, &xports_fdset)) {
-            eprintf("%s%u", count ? "," : "  ", fd);
+        if (FD_ISSET((int)fd, &xports_fdset)) {
+            eprintf("%s%zu", count ? "," : "  ", fd);
             ++count;
         }
     }
@@ -679,7 +779,7 @@ static int
 check_xports_duplicates(void)
 {
     SVCXPRT *xprt1, *xprt2;
-    int id1, id2;
+    size_t id1, id2;
     int err;
 
     /*
@@ -693,11 +793,11 @@ check_xports_duplicates(void)
                 xprt2 = xports[id2];
                 if (xprt2 != BAD_SVCXPRT_PTR) {
                     if (xprt2 == xprt1) {
-                        eprintf("xports[%d] == xports[%d]\n", id2, id1);
+                        eprintf("xports[%zu] == xports[%zu]\n", id2, id1);
                         err = 1;
                     }
                     else if (xprt2->xp_pad == xprt1->xp_pad) {
-                        eprintf("xports[%d]->xp_pad == xports[%d]->xp_pad\n",
+                        eprintf("xports[%zu]->xp_pad == xports[%zu]->xp_pad\n",
                             id2, id1);
                         err = 1;
                     }
@@ -723,7 +823,7 @@ check_xports(void)
 {
     SVCXPRT *xprt;
     mtxprt_t *mtxprt;
-    int id;
+    size_t id;
     int err;
 
     if (xports == NULL) {
@@ -763,8 +863,8 @@ check_xports(void)
             if (!is_valid_svcxprt(sock_xprt)) {
                 err = 1;
             }
-            if (!FD_ISSET(id, &xports_fdset)) {
-                eprintf("id=%d not in xports_fdset.\n", id);
+            if (!FD_ISSET((int)id, &xports_fdset)) {
+                eprintf("id=%zu not in xports_fdset.\n", id);
                 err = 1;
             }
         }
@@ -792,7 +892,7 @@ check_xports(void)
         }
         mtxprt = xprt_to_mtxprt_nocheck(xprt);
         if (mtxprt->mtxp_refcnt != mtxprt->mtxp_fsck_refcnt) {
-            eprintf("id=%d -- expect ref count=%d, got %d.\n",
+            eprintf("id=%zu -- expect ref count=%d, got %d.\n",
                 id, mtxprt->mtxp_refcnt, mtxprt->mtxp_fsck_refcnt);
             err = 1;
         }
@@ -910,15 +1010,15 @@ init_pollfd(int fd)
  * be used as a unique ID number.  So, we just allocate and free ID numbers,
  * independent of the socket.
  */
-static int
+static size_t
 xprt_id_alloc(void)
 {
-    int id;
+    size_t id;
 
     assert(pthread_mutex_is_locked(&xports_lock));
     for (id = 0; id < xports_size; ++id) {
-        if (!FD_ISSET(id, &xports_fdset)) {
-            FD_SET(id, &xports_fdset);
+        if (!FD_ISSET((int)id, &xports_fdset)) {
+            FD_SET((int)id, &xports_fdset);
             ++xports_count;
             break;
         }
@@ -928,12 +1028,12 @@ xprt_id_alloc(void)
         /*
          * If this becomes a problem, and we really want to have
          * more outstanding SVCXPRT clones at one time, then switch
-         * to an allocator than can handle ID numbers bigger than
+         * to an allocator that can handle ID numbers bigger than
          * @var{xports_size}.  vmem(), perhaps.
          */
-        teprintf("Ran out of xprt IDs.  xports_size=%d\n", xports_size);
+        teprintf("Ran out of xprt IDs.  xports_size=%zu\n", xports_size);
         svc_die();
-        return (-1);
+        return (XPRT_ID_INVALID);
     }
     return (id);
 }
@@ -956,14 +1056,6 @@ sfr_track_xprt_socket(int sock, SVCXPRT *xprt)
 
     // Record timestamp, and at the same time, mark sfr record as valid
     sfr->sfr_timestamp = rdtsc() - t0;
-}
-
-#else
-
-static inline void
-sfr_track_xprt_socket(int sock, SVCXPRT *xprt)
-{
-    sock_xports[sock] = xprt;
 }
 
 #endif /* SFR_SOCKET */
@@ -1009,7 +1101,7 @@ LIBRARY int
 xprt_register_with_lock(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
-    int xprt_id;
+    size_t xprt_id;
     int sock;
     int err;
 
@@ -1026,7 +1118,7 @@ xprt_register_with_lock(SVCXPRT *xprt)
         return (0);
     }
 
-    if (xprt_id == -1) {
+    if (xprt_id == XPRT_ID_INVALID) {
         xprt_id = xprt_id_alloc();
         mtxprt->mtxp_id = xprt_id;
     }
@@ -1035,11 +1127,11 @@ xprt_register_with_lock(SVCXPRT *xprt)
         show_xports();
     }
 
-    tprintf(2, "xprt=%s, xprt_id=%d, sock=%d, parent=%d, fd=%d\n",
+    tprintf(2, "xprt=%s, xprt_id=%zu, sock=%d, parent=%zu, fd=%d\n",
         decode_addr(xprt), xprt_id, sock, mtxprt->mtxp_parent, xprt->xp_sock);
 
     if (xprt_id >= xports_size) {
-        teprintf("xprt_id >= xports_size (%d)\n", xports_size);
+        teprintf("xprt_id >= xports_size (%zu)\n", xports_size);
         svc_die();
     }
 
@@ -1058,7 +1150,10 @@ xprt_register_with_lock(SVCXPRT *xprt)
             svc_die();
         }
 
+#if defined(SFR_SOCKET)
         sfr_track_xprt_socket(sock, xprt);
+#endif /* SFR_SOCKET */
+
         err = init_pollfd(sock);
     }
     else {
@@ -1080,7 +1175,7 @@ LIBRARY void
 xprt_register(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
-    int id;
+    size_t id;
     int err;
 
     check_svcxprt(xprt);
@@ -1118,10 +1213,10 @@ pollfd_remove(struct pollfd *pollfdv, nfds_t pollfdsz, int sock)
 }
 
 static void
-unregister_id(int id)
+unregister_id(size_t id)
 {
-    if (!(id >= 0 && id < xports_size)) {
-        teprintf("Bad id: %d\n", id);
+    if (!id_is_valid(id)) {
+        teprintf("Bad id: %zu\n", id);
         svc_die();
     }
 
@@ -1131,8 +1226,8 @@ unregister_id(int id)
     xports_update_view(id);
     ++xports_version;
 
-    tprintf(2, "free id=%d\n", id);
-    FD_CLR(id, &xports_fdset);
+    tprintf(2, "free id=%zu\n", id);
+    FD_CLR((int)id, &xports_fdset);
     --xports_count;
 }
 
@@ -1144,20 +1239,20 @@ LIBRARY int
 xprt_unregister_with_lock(SVCXPRT *xprt)
 {
     mtxprt_t *mtxprt;
-    int id;
+    size_t id;
 
     check_svcxprt_exists(xprt);
     mtxprt = xprt_to_mtxprt(xprt);
 
     id = mtxprt->mtxp_id;
 
-    if (!(id >= 0 && id < xports_size)) {
-        teprintf("Bad id: %d\n", id);
+    if (!id_is_valid(id)) {
+        teprintf("Bad id: %zu\n", id);
         svc_die();
     }
 
     if (xports[id] != xprt) {
-        teprintf("xports[%d] != xprt(%s)\n", id, decode_addr(xprt));
+        teprintf("xports[%zu] != xprt(%s)\n", id, decode_addr(xprt));
         svc_die();
     }
 
@@ -1221,7 +1316,7 @@ svc_is_mapped(rpcprog_t prog, rpcvers_t vers)
     struct svc_callout *prev;
     struct svc_callout *s;
 
-    s = svc_find (prog, vers, &prev);
+    s = svc_find(prog, vers, &prev);
     return (s != NULL_SVC && s->sc_mapped);
 }
 
@@ -1242,8 +1337,10 @@ svc_register(SVCXPRT *xprt, rpcprog_t prog, rpcvers_t vers,
     check_svcxprt_exists(xprt);
 
     if ((s = svc_find(prog, vers, &prev)) != NULL_SVC) {
-        if (s->sc_dispatch == dispatch)
-            goto pmap_it;       /* he is registering another xptr */
+        if (s->sc_dispatch == dispatch) {
+            /* he is registering another xptr */
+            goto pmap_it;
+        }
         return (FALSE);
     }
     s = (struct svc_callout *)guard_malloc(sizeof (struct svc_callout));
@@ -1258,9 +1355,9 @@ svc_register(SVCXPRT *xprt, rpcprog_t prog, rpcvers_t vers,
   pmap_it:
     /* now register the information with the local binder service */
     if (protocol) {
-        if (!pmap_set(prog, vers, protocol, xprt->xp_port))
+        if (!pmap_set(prog, vers, protocol, xprt->xp_port)) {
             return (FALSE);
-
+        }
         s->sc_mapped = TRUE;
     }
 
@@ -1536,6 +1633,19 @@ svc_getreq_poll_mt(struct pollfd *pfdp, nfds_t npoll, int pollretval)
                 break;
         }
     }
+
+    /*
+     * Do xprt garbage collection after all the calls to svc_getreq_common().
+     * We retire xprts at the start of servicing a new request, because
+     * it is safe to do it there, while we are briefly in single-thread
+     * mode, before mtmode dispatch allocates resources and dipatches
+     * a new request.  But, if we do garbage collection _only_ there,
+     * then some leftovers can stay not destroyed for some time,
+     * depending on the arrival of a new request.
+     */
+    if (fds_found != 0) {
+        (void)xprt_gc_reap_all();
+    }
 }
 
 /*
@@ -1570,6 +1680,7 @@ wait_on_progress(SVCXPRT *xprt, int mask, const char *desc)
     id = mtxprt->mtxp_id;
     tprintf(2, "xprt=%s, id=%d, %s, fd=%d\n",
 	    decode_addr(xprt), id, desc, xprt->xp_sock);
+
     for (;;) {
         int i;
 
@@ -1582,14 +1693,212 @@ wait_on_progress(SVCXPRT *xprt, int mask, const char *desc)
     }
 }
 
+struct req {
+    int fd;
+    SVCXPRT  *xprt;
+    mtxprt_t *mtxprt;
+    SVCXPRT  *worker_xprt;
+    struct rpc_msg *msgp;
+    struct svc_req *rqstp;
+
+    int rv;
+    int  err;
+    enum xprt_stat xrv;
+};
+
+typedef struct req req_t;
+
+
+static void
+request_dispatch(req_t *reqp, struct svc_callout *s)
+{
+    mtxprt_t *mtxprt;
+    struct svc_req *xprt_rqstp;
+    struct svc_req *rqstp;
+
+    if (mtmode) {
+        mtxprt = xprt_to_mtxprt(reqp->xprt);
+        if (mtxprt->mtxp_clone != NULL) {
+            reqp->worker_xprt = svc_xprt_clone(reqp->xprt);
+        }
+        else {
+            reqp->worker_xprt = reqp->xprt;
+        }
+    }
+    else {
+        reqp->worker_xprt = reqp->xprt;
+        worker_return = 0;
+    }
+
+    mtxprt = xprt_to_mtxprt(reqp->worker_xprt);
+    xprt_rqstp = &(mtxprt->mtxp_rqst);
+    if (mtxprt->mtxp_parent == NO_PARENT) {
+        xprt_set_busy(reqp->worker_xprt, 1);
+    }
+    pthread_mutex_lock(&(mtxprt->mtxp_progress_lock));
+    if (mtxprt->mtxp_progress & XPRT_DONE_RETURN) {
+        mtxprt->mtxp_progress = 0;
+    }
+    pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
+
+    rqstp = reqp->rqstp;
+    tprintf(2, "> dispatch: prog=%d proc=%d fd=%d\n",
+        (int)rqstp->rq_prog, (int)rqstp->rq_proc, reqp->fd);
+    (*s->sc_dispatch)(xprt_rqstp, reqp->worker_xprt);
+    tprintf(2, "< dispatch: prog=%d proc=%d fd=%d\n",
+        (int)rqstp->rq_prog, (int)rqstp->rq_proc, reqp->fd);
+    if (mtmode) {
+        wait_on_progress(reqp->worker_xprt, XPRT_DONE_GETARGS, "XPRT_DONE_GETARGS");
+        tprintf(2, "wait done: fd=%d\n", reqp->xprt->xp_sock);
+    }
+    else {
+        while (worker_return == 0) {
+            const struct timespec ms = { 0, 1000000 };
+            nanosleep(&ms, NULL);
+        }
+    }
+}
+
+/*
+ * Request has been received and then authenticated.
+ * Now, match message with a registered service.
+ */
+static void
+request_match_prog_version(req_t *reqp)
+{
+    struct svc_callout *s;
+    rpcvers_t low_vers;
+    rpcvers_t high_vers;
+    unsigned int cnt_prog;
+
+    cnt_prog = 0;
+    for (s = svc_head; s != NULL_SVC; s = s->sc_next) {
+        if (s->sc_prog == reqp->rqstp->rq_prog) {
+            // Found correct program
+            if (s->sc_vers == reqp->rqstp->rq_vers) {
+                // Found correct version 
+                request_dispatch(reqp, s);
+            }
+            else {
+                if (cnt_prog == 0 || s->sc_vers < low_vers) {
+                    low_vers = s->sc_vers;
+                }
+                if (cnt_prog == 0 || s->sc_vers > high_vers) {
+                    high_vers = s->sc_vers;
+                }
+                tprintf(2, "svcerr_progvers()\n");
+                svcerr_progvers(reqp->worker_xprt, low_vers, high_vers);
+            }
+            ++cnt_prog;
+        }
+        else {
+            tprintf(2, "svcerr_noprog()\n");
+            svcerr_noprog(reqp->worker_xprt);
+        }
+    }
+}
+
+/*
+ * We received a request.  Now, find the exported program and call it.
+ */
+static void
+request_lookup(req_t *reqp)
+{
+    SVCXPRT *xprt;
+    mtxprt_t *mtxprt;
+    struct rpc_msg *msgp;
+    struct svc_req *rqstp;
+    enum auth_stat why;
+
+    // Populate local variables from reqp
+    xprt   = reqp->xprt;
+    mtxprt = reqp->mtxprt;
+    msgp   = reqp->msgp;
+
+    // Start with clean status
+    reqp->rv  = 0;
+    reqp->err = 0;
+    reqp->xrv = 0;
+
+    rqstp = &(mtxprt->mtxp_rqst);
+    rqstp->rq_clntcred = &(mtxprt->mtxp_cred[2 * MAX_AUTH_BYTES]);
+    rqstp->rq_xprt = xprt;
+    rqstp->rq_prog = msgp->rm_call.cb_prog;
+    rqstp->rq_vers = msgp->rm_call.cb_vers;
+    rqstp->rq_proc = msgp->rm_call.cb_proc;
+    rqstp->rq_cred = msgp->rm_call.cb_cred;
+
+    /* first authenticate the message */
+    /* Check for null flavor and bypass these calls if possible */
+
+    if (msgp->rm_call.cb_cred.oa_flavor == AUTH_NULL) {
+        rqstp->rq_xprt->xp_verf.oa_flavor = _null_auth.oa_flavor;
+        rqstp->rq_xprt->xp_verf.oa_length = 0;
+    }
+    else if ((why = _authenticate(rqstp, msgp)) != AUTH_OK) {
+        tprintf(2, "\n");
+        svcerr_auth(xprt, why);
+        reqp->rv  = -1;
+        reqp->err = 1;
+        return;
+    }
+
+    reqp->rqstp = rqstp;
+    request_match_prog_version(reqp);
+}
+
+static void
+get_single_request(req_t *reqp)
+{
+    struct rpc_msg *msgp;
+    mtxprt_t *mtxprt;
+
+    (void)xprt_gc_reap_all();
+    reqp->mtxprt = xprt_to_mtxprt(reqp->xprt);
+    mtxprt = reqp->mtxprt;
+    msgp = &mtxprt->mtxp_msg;
+    msgp->rm_call.cb_cred.oa_base = &(mtxprt->mtxp_cred[0]);
+    msgp->rm_call.cb_verf.oa_base = &(mtxprt->mtxp_cred[MAX_AUTH_BYTES]);
+
+    // In case we fail before xprt is cloned.
+    reqp->worker_xprt = reqp->xprt;
+
+    reqp->rv = 0;
+    if (SVC_RECV(reqp->xprt, msgp)) {
+        reqp->msgp = msgp;
+        request_lookup(reqp);
+    }
+
+    if (reqp->rv != 0) {
+        return;
+    }
+
+    reqp->xrv = SVC_STAT(reqp->worker_xprt);
+
+    if (!xprt_stat_is_valid(reqp->xrv)) {
+        teprintf("Invalid xptr_stat, %d.\n", reqp->xrv);
+        svc_die();
+    }
+
+    if (reqp->xrv == XPRT_DIED) {
+        int sock;
+
+        tprintf(2, "XPRT_DIED.\n"
+            " worker_xprt=%s\n", decode_addr(reqp->worker_xprt));
+        sock = reqp->worker_xprt->xp_sock;
+        if (sock != -1) {
+            // lock
+            // sock_xports[sock] = BAD_SVCXPRT_PTR;
+            // unlock
+        }
+        xprt_gc_mark(reqp->worker_xprt);
+    }
+}
+
 LIBRARY int
 svc_getreq_common_rv(const int fd)
 {
-    enum xprt_stat stat;
-    struct rpc_msg *msgp;
     SVCXPRT *xprt;
-    SVCXPRT *worker_xprt;
-    mtxprt_t *mtxprt;
 
     xports_global_lock();
     check_xports();
@@ -1613,142 +1922,22 @@ svc_getreq_common_rv(const int fd)
     check_svcxprt_exists(xprt);
 
     /* Now receive msgs from xprt (support batch calls) */
-    do {
-        (void)xprt_gc_reap_all();
-        mtxprt = xprt_to_mtxprt(xprt);
-        msgp = &mtxprt->mtxp_msg;
-        msgp->rm_call.cb_cred.oa_base = &(mtxprt->mtxp_cred[0]);
-        msgp->rm_call.cb_verf.oa_base = &(mtxprt->mtxp_cred[MAX_AUTH_BYTES]);
+    for (;;) {
+        req_t req;
 
-        // In case we fail before xprt is cloned.
-        worker_xprt = xprt;
+        memset((void *)&req, 0, sizeof (req));
+        req.fd = fd;
+        req.xprt = xprt;
 
-        if (SVC_RECV(xprt, msgp)) {
-            /* now find the exported program and call it */
-            struct svc_callout *s;
-            struct svc_req *rqstp;
-            enum auth_stat why;
-            rpcvers_t low_vers;
-            rpcvers_t high_vers;
-            int prog_found;
-            int err;
-
-            err = 0;
-            rqstp = &(mtxprt->mtxp_rqst);
-            rqstp->rq_clntcred = &(mtxprt->mtxp_cred[2 * MAX_AUTH_BYTES]);
-            rqstp->rq_xprt = xprt;
-            rqstp->rq_prog = msgp->rm_call.cb_prog;
-            rqstp->rq_vers = msgp->rm_call.cb_vers;
-            rqstp->rq_proc = msgp->rm_call.cb_proc;
-            rqstp->rq_cred = msgp->rm_call.cb_cred;
-
-            /* first authenticate the message */
-            /* Check for null flavor and bypass these calls if possible */
-
-            if (msgp->rm_call.cb_cred.oa_flavor == AUTH_NULL) {
-                rqstp->rq_xprt->xp_verf.oa_flavor = _null_auth.oa_flavor;
-                rqstp->rq_xprt->xp_verf.oa_length = 0;
-            } else if ((why = _authenticate(rqstp, msgp)) != AUTH_OK) {
-                tprintf(2, "\n");
-                svcerr_auth(xprt, why);
-                err = 1;
-            }
-
-            if (err) {
-                goto call_done;
-            }
-
-            /* now match message with a registered service */
-            prog_found = FALSE;
-            low_vers = 0 - 1;
-            high_vers = 0;
-
-            for (s = svc_head; s != NULL_SVC; s = s->sc_next) {
-                if (s->sc_prog == rqstp->rq_prog) {
-                    if (s->sc_vers == rqstp->rq_vers) {
-                        mtxprt_t *mtxprt;
-                        struct svc_req *xprt_rqstp;
-
-                        if (mtmode) {
-                            mtxprt = xprt_to_mtxprt(xprt);
-                            if (mtxprt->mtxp_clone != NULL) {
-                                worker_xprt = svc_xprt_clone(xprt);
-                            }
-                            else {
-                                worker_xprt = xprt;
-                            }
-                        }
-                        else {
-                            worker_xprt = xprt;
-                            worker_return = 0;
-                        }
-                        mtxprt = xprt_to_mtxprt(worker_xprt);
-                        xprt_rqstp = &(mtxprt->mtxp_rqst);
-                        if (mtxprt->mtxp_parent == NO_PARENT) {
-                            xprt_set_busy(worker_xprt, 1);
-                        }
-                        pthread_mutex_lock(&(mtxprt->mtxp_progress_lock));
-                        if (mtxprt->mtxp_progress & XPRT_DONE_RETURN) {
-                            mtxprt->mtxp_progress = 0;
-                        }
-			pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
-                        tprintf(2, "> dispatch: prog=%d proc=%d fd=%d\n",
-				(int)rqstp->rq_prog, (int)rqstp->rq_proc, fd);
-                        (*s->sc_dispatch)(xprt_rqstp, worker_xprt);
-                        tprintf(2, "< dispatch: prog=%d proc=%d fd=%d\n",
-				(int)rqstp->rq_prog, (int)rqstp->rq_proc, fd);
-                        if (mtmode) {
-                            wait_on_progress(worker_xprt, XPRT_DONE_GETARGS, "XPRT_DONE_GETARGS");
-			    tprintf(2, "wait done: fd=%d\n", xprt->xp_sock);
-			}
-                        else {
-                            while (worker_return == 0) {
-                                const struct timespec ms = { 0, 1000000 };
-                                nanosleep(&ms, NULL);
-                            }
-                        }
-                        goto call_done;
-                    }
-                    /* found correct version */
-                    prog_found = TRUE;
-                    if (s->sc_vers < low_vers)
-                        low_vers = s->sc_vers;
-                    if (s->sc_vers > high_vers)
-                        high_vers = s->sc_vers;
-                }
-                /* found correct program */
-            }
-            /* if we got here, the program or version
-               is not served ... */
-            if (prog_found) {
-                tprintf(2, "svcerr_progvers()\n");
-                svcerr_progvers(worker_xprt, low_vers, high_vers);
-            }
-            else {
-                tprintf(2, "svcerr_noprog()\n");
-                svcerr_noprog(worker_xprt);
-            }
-            /* Fall through to ... */
+        get_single_request(&req);
+        if (req.rv != 0) {
+            return (req.rv);
         }
-        tprintf(2, "fall through to @label{call_done}\n");
-      call_done:
-        tprintf(2, "call_done: fd=%d\n", xprt->xp_sock);
-        if ((stat = SVC_STAT(worker_xprt)) == XPRT_DIED) {
-            int sock;
 
-            tprintf(2, "XPRT_DIED.\n"
-                " worker_xprt=%s\n", decode_addr(worker_xprt));
-            sock = worker_xprt->xp_sock;
-            if (sock != -1) {
-                // lock
-                // sock_xports[sock] = BAD_SVCXPRT_PTR;
-                // unlock
-            }
-            xprt_gc_mark(worker_xprt);
+        if (req.xrv != XPRT_MOREREQS) {
             break;
         }
     }
-    while (stat == XPRT_MOREREQS);
 
     return (0);
 }
