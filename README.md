@@ -102,6 +102,13 @@ with Themis Computer, http://www.themis.com.
 
 It was based on eglibc-2.11.1/sunrpc.
 
+Customers
+=========
+Besides Themis Computer, RPC-MT is in use by these "customers":
+
+  1. Keck Observatory
+  2. xxx (need permission)
+
 License
 =======
 Since RPC-MT code is derived from the Glibc RPC code, written by Oracle,
