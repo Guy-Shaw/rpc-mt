@@ -1,4 +1,4 @@
-CC := @CC@
+CC := gcc
 
 CPPFLAGS := -I../inc -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC
 GFLAGS := -g -ggdb -g3
@@ -8,6 +8,7 @@ SRC_C := \
     dbuf-thread.c \
     decode-addr.c \
     decode-size.c \
+    decode-xid.c \
     decode-poll-events.c \
     decode-inet-family.c \
     decode-inet-endpoint.c \

@@ -46,6 +46,8 @@ extern char *decode_addr_r(char *buf, size_t bufsz, void *addr);
 extern char *decode_addr(void *addr);
 extern char *decode_int_r(char *buf, size_t bufsz, int i);
 extern char *decode_int(int i);
+extern char *decode_xid_r(char *buf, size_t bufsz, size_t id, const char *neg1);
+extern char *decode_xid(size_t id, const char *neg1);
 
 #ifdef  __cplusplus
 }
