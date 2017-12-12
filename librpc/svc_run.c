@@ -164,8 +164,9 @@ svc_run(void)
             trace_printf_with_lock("poll\n");
             eprintf_with_lock("  [\n");
             for (i = 0; i < npoll; ++i) {
-                eprintf_with_lock("    {fd=%d, events=%s}\n",
-                    my_pollfd[i].fd, decode_poll_events(my_pollfd[i].events));
+                int pe = my_pollfd[i].events;
+                eprintf_with_lock("    {fd=%d, events=x%x=%s}\n",
+                    my_pollfd[i].fd, pe, decode_poll_events(pe));
             }
             eprintf_with_lock("  ]\n");
             pthread_mutex_unlock(&trace_lock);

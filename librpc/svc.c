@@ -1127,8 +1127,12 @@ xprt_register_with_lock(SVCXPRT *xprt)
         show_xports();
     }
 
-    tprintf(2, "xprt=%s, xprt_id=%zu, sock=%d, parent=%zu, fd=%d\n",
-        decode_addr(xprt), xprt_id, sock, mtxprt->mtxp_parent, xprt->xp_sock);
+    tprintf(2, "xprt=%s, xprt_id=%zu, sock=%d, parent=%s, fd=%d\n",
+        decode_addr(xprt),
+        xprt_id,
+        sock,
+        decode_xid(mtxprt->mtxp_parent, "none"),
+        xprt->xp_sock);
 
     if (xprt_id >= xports_size) {
         teprintf("xprt_id >= xports_size (%zu)\n", xports_size);

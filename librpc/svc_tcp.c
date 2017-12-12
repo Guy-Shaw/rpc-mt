@@ -442,9 +442,12 @@ svctcp_destroy(SVCXPRT *xprt)
     mtxprt = xprt_to_mtxprt(xprt);
     sock = xprt->xp_sock;
 
-    tprintf(2, "xprt=%s, mtxprt=%s, fd=%u, prnt=%zu, port=%d\n",
-        decode_addr(xprt), decode_addr(mtxprt), xprt->xp_sock,
-        mtxprt->mtxp_parent, xprt->xp_port);
+    tprintf(2, "xprt=%s, mtxprt=%s, fd=%u, prnt=%s, port=%d\n",
+        decode_addr(xprt),
+        decode_addr(mtxprt),
+        xprt->xp_sock,
+        decode_xid(mtxprt->mtxp_parent, "none"),
+        xprt->xp_port);
     /*
      * Close socket if this xprt is not a clone.
      */
@@ -495,7 +498,6 @@ svctcp_destroy(SVCXPRT *xprt)
     free(xprt);
 }
 
-
 /*
  * reads data from the tcp connection.
  * any error is fatal and the connection is closed.
@@ -512,6 +514,7 @@ readtcp_with_lock(char *xprtptr, char *buf, int ilen)
     ssize_t rdlen;
     int rv;
     int err;
+    int pe;
 
     tprintf(2, "ilen=%d\n", ilen);
     xprt = (SVCXPRT *)xprtptr;
@@ -537,8 +540,10 @@ readtcp_with_lock(char *xprtptr, char *buf, int ilen)
             teprintf("poll() => 0\n");
             goto fatal_err;
         default:
-            if ((pollfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-                teprintf("pollfd.revents=%x\n", pollfd.revents);
+            pe = pollfd.revents;
+            if ((pe & POLLNVAL) != 0) {
+                teprintf("pollfd.fd=%d, pollfd.revents=x%x={%s}\n",
+                    pollfd.fd, pe, decode_poll_events(pe));
                 goto fatal_err;
             }
             break;
