@@ -1,29 +1,13 @@
-CC := gcc
+CC := @CC@
 
 CPPFLAGS := -I../inc -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC
 GFLAGS := -g -ggdb -g3
 CFLAGS := $(GFLAGS) -Wall -pthread -fPIC $(CPPFLAGS)
 
-SRC_C := \
-    dbuf-thread.c \
-    decode-addr.c \
-    decode-size.c \
-    decode-xid.c \
-    decode-poll-events.c \
-    decode-inet-family.c \
-    decode-inet-endpoint.c \
-    decode-inet-peer.c \
-    decode-esym.c \
-    decode-errno.c \
-    decode-int.c \
-    strict-conv.c \
-    sisfx.c \
-    util.c \
-    ###
-
+SRC_C := $(sort $(wildcard *.c))
 SRC_I := $(SRC_C:%.c=%.i)
 SRC_M := $(SRC_C:%.c=%.m)
-OBJ := $(SRC_C:%.c=%.o)
+OBJ   := $(SRC_C:%.c=%.o)
 
 .PHONY: all dev ifiles mfiles hfiles clean
 
@@ -70,7 +54,8 @@ mcc:
 	mcc --mcc:header $(CFLAGS) -c -- $(SRC_C)
 
 show:
-	echo SRC_C = $(SRC_C)
-	echo SRC_I = $(SRC_I)
-	echo SRC_M = $(SRC_M)
-	echo OBJ = $(OBJ)
+	@echo SRC_C = $(SRC_C)
+	@echo ALT_SRC_C = $(ALT_SRC_C)
+	@echo SRC_I = $(SRC_I)
+	@echo SRC_M = $(SRC_M)
+	@echo OBJ = $(OBJ)
