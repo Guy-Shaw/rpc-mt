@@ -1,0 +1,225 @@
+#! /usr/bin/perl -w
+    eval 'exec /usr/bin/perl -S $0 ${1+"$@"}'
+        if 0; #$running_under_some_shell
+
+# Filename: cpp-defs
+# Brief: Extract information about C proerocessor macros used
+#
+# Copyright (C) 2017 Guy Shaw
+# Written by Guy Shaw <gshaw@acm.org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as
+# published by the Free Software Foundation; either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=pod
+
+=begin description
+
+Take the output of @command{gcc -dU -E ...} and extract information about
+all of the macros used:
+
+  1) the filename and line number where each is #defined
+  2) the definiendum
+  3) all expansions, where used
+
+=end description
+
+=cut
+
+require 5.0;
+use strict;
+use warnings;
+use Carp;
+use diagnostics;
+use Getopt::Long;
+use File::Spec::Functions;
+use Cwd qw(getcwd);             # Needed at least for explain_cwd()
+
+my $eprint_fh;
+my $dprint_fh;
+
+my $debug   = 0;
+my $verbose = 0;
+my @paths_include = ();
+my @paths_exclude = ();
+
+my @options = (
+    'debug'     => \$debug,
+    'verbose'   => \$verbose,
+    'include=s' => \@paths_include,
+    'exclude=s' => \@paths_exclude,
+);
+
+my $any_change = 0;
+
+#:subroutines:#
+
+# Decide how to direct eprint*() and dprint*() functions.
+# If STDOUT and STDERR are directed to the same "channel",
+# then eprint*() and dprint*() should be tied to the same file handle.
+#
+# Otherwise, buffering could cause a mix of STDOUT and STDERR to
+# be written out of order.
+#
+sub set_print_fh {
+    my @stdout_statv;
+    my @stderr_statv;
+    my $stdout_chan;
+    my $stderr_chan;
+
+    @stdout_statv = stat(*STDOUT);
+    @stderr_statv = stat(*STDERR);
+    $stdout_chan = join(':', @stdout_statv[0, 1, 6]);
+    $stderr_chan = join(':', @stderr_statv[0, 1, 6]);
+    if (!defined($eprint_fh)) {
+        $eprint_fh = ($stderr_chan eq $stdout_chan) ? *STDOUT : *STDERR;
+    }
+    if (!defined($dprint_fh)) {
+        $dprint_fh = ($stderr_chan eq $stdout_chan) ? *STDOUT : *STDERR;
+    }
+}
+
+# print/printf to stderr.  Mark as error message, using color or highlight.
+#
+sub eprint {
+    if (-t $eprint_fh) {
+        print {$eprint_fh} "\e[01;31m\e[K", @_, "\e[m\e[K";
+    }
+    else {
+        print {$eprint_fh} @_;
+    }
+}
+
+sub eprintf {
+    if (-t $eprint_fh) {
+        print  {$eprint_fh}  "\e[01;31m\e[K";
+        printf {$eprint_fh} @_;
+        print  {$eprint_fh}  "\e[m\e[K";
+    }
+    else {
+        printf {$eprint_fh} @_;
+    }
+}
+
+# print/printf to same fd as stderr, but information only.
+# Do not mark, or color or highlight in any way.
+#
+sub ieprint {
+    print  {$eprint_fh} @_;
+}
+
+sub ieprintf {
+    printf {$eprint_fh} @_;
+}
+
+sub vprint {
+    print @_ if ($verbose);
+}
+
+sub vprintf {
+    printf @_ if ($verbose);
+}
+
+# print/prinf to same fd as stderr, like ieprint/ieprintf, but only if --verbose
+#
+sub veprint {
+    print  {$eprint_fh} @_ if ($verbose);
+}
+
+sub veprintf {
+    printf {$eprint_fh} @_ if ($verbose);
+}
+
+# print/printf to dprint_fh only if --debug
+# dprint_fh may or may not be the same as eprint_fh,
+# which may or may not be stderr.
+#
+sub dprint {
+    print {$dprint_fh} @_ if ($debug);
+}
+
+sub dprintf {
+    printf {$dprint_fh} @_ if ($debug);
+}
+
+sub err_exit {
+    my ($xcode) = @_;
+
+    if ($any_change == 0) {
+        ieprint "Nothing done.\n";
+    }
+    exit $xcode;
+}
+
+sub filter_path_include {
+    my ($line) = @_;
+
+    return 1  if (scalar(@paths_include) == 0);
+
+    for my $pattern (@paths_include) {
+        if ($line =~ m{$pattern}msx) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+sub filter_path_exclude {
+    my ($line) = @_;
+
+    return 1  if (scalar(@paths_exclude) == 0);
+
+    for my $pattern (@paths_exclude) {
+        if ($line =~ m{$pattern}msx) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+sub filter_path {
+    return filter_path_include(@_) && filter_path_exclude(@_);
+}
+
+#:options:#
+
+set_print_fh();
+
+GetOptions(@options) or exit 2;
+
+@paths_include = map { qr/$_/ } @paths_include;
+@paths_exclude = map { qr/$_/ } @paths_exclude;
+
+#:main:#
+
+my $cpath = '<none>';
+my $show = 0;
+
+while (<>) {
+    chomp;
+    s{\r\z}{}msx;
+    next if ($_ eq '');
+    if (m{\A\#\s+\d+\s+"([^"]+)"}msx) {
+        ### ieprint ' -> ', $_, "\n";
+        $cpath = $1;
+        $show = filter_path($cpath);
+    }
+
+    if ($show) {
+        print $_, "\n";
+    }
+}
+
+exit 0;
