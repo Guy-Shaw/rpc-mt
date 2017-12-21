@@ -465,7 +465,7 @@ xprt_lock(SVCXPRT *xprt)
 
     mtxprt = xprt_to_mtxprt(xprt);
     lockp = &mtxprt->mtxp_lock;
-    tprintf(2, "xprt=%s, xprt_id=%zu, fd=%d\n",
+    tprintf(8, "xprt=%s, xprt_id=%zu, fd=%d\n",
         decode_addr(xprt), mtxprt->mtxp_id, xprt->xp_sock);
     ret = pthread_mutex_lock(lockp);
     if (ret != 0) {
@@ -482,7 +482,7 @@ xprt_unlock(SVCXPRT *xprt)
 
     mtxprt = xprt_to_mtxprt(xprt);
     lockp = &mtxprt->mtxp_lock;
-    tprintf(2, "xprt=%s, xprt_id=%zu, fd=%d\n",
+    tprintf(8, "xprt=%s, xprt_id=%zu, fd=%d\n",
         decode_addr(xprt), mtxprt->mtxp_id, xprt->xp_sock);
     ret = pthread_mutex_unlock(lockp);
     if (ret != 0) {
@@ -508,7 +508,7 @@ xprt_set_busy(SVCXPRT *xprt, int value)
     pthread_mutex_lock(&(mtxprt->mtxp_progress_lock));
     mtxprt->mtxp_busy = value;
     pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
-    tprintf(2, "xprt=%s, value=%d, fd=%d\n",
+    tprintf(9, "xprt=%s, value=%d, fd=%d\n",
 	    decode_addr(xprt), value, xprt->xp_sock);
 }
 
@@ -552,7 +552,7 @@ xprt_get_progress(SVCXPRT *xprt)
     pthread_mutex_lock(&(mtxprt->mtxp_progress_lock));
     progress = mtxprt->mtxp_progress;
     pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
-    tprintf(2, "xprt=%s, progress=%d, fd=%d\n",
+    tprintf(8, "xprt=%s, progress=%d, fd=%d\n",
 	    decode_addr(xprt), progress, xprt->xp_sock);
     return (progress);
 }
@@ -572,7 +572,7 @@ xprt_progress_setbits(SVCXPRT *xprt, int value)
     progress = mtxprt->mtxp_progress | value;
     mtxprt->mtxp_progress = progress;
     pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
-    tprintf(2, "xprt=%s, progress=%d, fd=%d\n",
+    tprintf(8, "xprt=%s, progress=%d, fd=%d\n",
 	    decode_addr(xprt), progress, xprt->xp_sock);
     return (progress);
 }
@@ -588,7 +588,7 @@ xprt_progress_clrbits(SVCXPRT *xprt, int value)
     progress = mtxprt->mtxp_progress & ~value;
     mtxprt->mtxp_progress = progress;
     pthread_mutex_unlock(&(mtxprt->mtxp_progress_lock));
-    tprintf(2, "xprt=%s, progress=%d, fd=%d\n",
+    tprintf(8, "xprt=%s, progress=%d, fd=%d\n",
 	    decode_addr(xprt), progress, xprt->xp_sock);
     return (progress);
 }
@@ -1230,7 +1230,7 @@ unregister_id(size_t id)
     xports_update_view(id);
     ++xports_version;
 
-    tprintf(2, "free id=%zu\n", id);
+    tprintf(7, "free id=%zu\n", id);
     FD_CLR((int)id, &xports_fdset);
     --xports_count;
 }
@@ -1682,7 +1682,7 @@ wait_on_progress(SVCXPRT *xprt, int mask, const char *desc)
 
     mtxprt = xprt_to_mtxprt(xprt);
     id = mtxprt->mtxp_id;
-    tprintf(2, "xprt=%s, id=%d, %s, fd=%d\n",
+    tprintf(8, "xprt=%s, id=%d, %s, fd=%d\n",
 	    decode_addr(xprt), id, desc, xprt->xp_sock);
 
     for (;;) {
