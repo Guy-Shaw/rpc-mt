@@ -26,9 +26,22 @@ static __inline__ uint64_t
 rdtsc(void) {
     uint32_t lo, hi;
 
+#ifdef __x86_64__
     __asm__ __volatile__ (      // serialize
     "xorl %%eax,%%eax \n        cpuid"
     ::: "%rax", "%rbx", "%rcx", "%rdx");
+#else
+	/*
+	 * http://newbiz.github.io/cpp/2010/12/20/Playing-with-cpuid.html#heading_toc_j_5
+	 */
+	asm volatile ( "xorl %%eax,%%eax\n"
+		"pushl %%ebx\n"
+		"cpuid\n"
+		"popl %%ebx\n"
+		::: "%eax", "%ecx", "%edx"
+	);
+#endif
+
     /*
      * We cannot use "=A", since this would use %rax on x86_64
      * and return only the lower 32bits of the TSC
