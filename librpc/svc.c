@@ -442,7 +442,7 @@ xprt_to_mtxprt(SVCXPRT *xprt)
     if (mtxprt->mtxp_magic != MTXPRT_MAGIC) {
         teprintf("xprt=%s -- Bad magic, %x.\n",
             decode_addr(xprt), mtxprt->mtxp_magic);
-        svc_die();
+		return NULL;
     }
 
     return (mtxprt);
@@ -1974,6 +1974,8 @@ svc_return(SVCXPRT *xprt)
     mtxprt_t *mtxprt;
 
     mtxprt = xprt_to_mtxprt(xprt);
+	if (!mtxprt)
+		return;
 
     tprintf(2, "xprt=%s, fd=%d\n", decode_addr(xprt), xprt->xp_sock);
 
