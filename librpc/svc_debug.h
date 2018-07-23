@@ -52,6 +52,7 @@ extern pthread_mutex_t trace_lock;
         pthread_mutex_unlock(&trace_lock); \
     })
 
+#ifdef __x86_64__
 #define trace_printf_with_lock(fmt, ...) \
     ({ \
         dbuf_thread_reset(); \
@@ -61,6 +62,17 @@ extern pthread_mutex_t trace_lock;
             ## __VA_ARGS__); \
         fflush(stderr); \
     })
+#else
+#define trace_printf_with_lock(fmt, ...) \
+    ({ \
+        dbuf_thread_reset(); \
+        fflush(stderr); \
+        fprintf(stderr, "\n@%#x:%s:%u:%s: " fmt, \
+            (uintptr_t)pthread_self(), __FILE__, __LINE__, __FUNCTION__, \
+            ## __VA_ARGS__); \
+        fflush(stderr); \
+    })
+#endif
 
 #define trace_printf(fmt, ...) \
     ({ \
@@ -69,6 +81,7 @@ extern pthread_mutex_t trace_lock;
         pthread_mutex_unlock(&trace_lock); \
     })
 
+#ifdef __x86_64__
 #define teprintf_with_lock(fmt, ...) \
     ({ \
         dbuf_thread_reset(); \
@@ -78,6 +91,17 @@ extern pthread_mutex_t trace_lock;
             ## __VA_ARGS__); \
         fflush(stderr); \
     })
+#else
+#define teprintf_with_lock(fmt, ...) \
+    ({ \
+        dbuf_thread_reset(); \
+        fflush(stderr); \
+        fprintf(stderr, "\n@%#x:%s:%u:%s: ***ERROR***\n    " fmt, \
+            (uintptr_t)pthread_self(), __FILE__, __LINE__, __FUNCTION__, \
+            ## __VA_ARGS__); \
+        fflush(stderr); \
+    })
+#endif
 
 #define teprintf(fmt, ...) \
     ({ \
