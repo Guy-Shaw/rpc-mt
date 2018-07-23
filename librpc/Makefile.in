@@ -1,6 +1,6 @@
 CC := @CC@
 
-GFLAGS := -g -ggdb -g3
+GFLAGS := -g -ggdb -g3 @CFLAGS@
 CPP_INCS := -I../inc
 CPP_DEFS := -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC -D_RPC_THREAD_SAFE_
 CPP_FLAGS := $(CPP_INCS) $(CPP_DEFS)
