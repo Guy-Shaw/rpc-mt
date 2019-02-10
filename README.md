@@ -48,10 +48,15 @@ OpenSUSE, Fedora and RedHat Enterprise Linux (RHEL).
 Build
 =====
 ```
-    ( cd librpc && ./configure && make )
-
-    ( cd libdecode && ./configure && make )
+    cd src
+    make
 ```
+
+The makefile in directory 'src' takes care of ./configure and make
+for each library subdirecory: librpc and libdecode
+
+The command, `make clean` recursively does `make clean`
+for each library subdirecory.
 
 Portability
 ===========

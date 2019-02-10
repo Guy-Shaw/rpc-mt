@@ -1,7 +1,7 @@
 CC := @CC@
 
 GFLAGS := -g -ggdb -g3 -finstrument-functions
-CPP_INCS := -I../inc
+CPP_INCS := -I../inc -I.
 CPP_DEFS := -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC -D_RPC_THREAD_SAFE_
 CPP_FLAGS := $(CPP_INCS) $(CPP_DEFS)
 CFLAGS := $(GFLAGS) $(CPP_FLAGS) -Wall -Wextra -pthread -fPIC
