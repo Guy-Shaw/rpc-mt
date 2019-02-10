@@ -1,6 +1,31 @@
 /*
+ * Filename: svc_mtxprt.h
+ * Project: rpc-mt
+ * Brief: Definition of multi-threaded extensions to @type{SVCXPRT}
  *
+ * Copyright (C) 2016,2017 Guy Shaw
+ * Written by Guy Shaw <gshaw@acm.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+
+#ifndef _SVC_MTXPRT_H
+#define _SVC_MTXPRT_H 1
+
+#ifdef  __cplusplus
+extern "C" {
+#endif
 
 #include <sys/types.h>   // Import caddr_t
 #include <pthread.h>     // Import pthread_t, pthread_mutex_t
@@ -11,9 +36,16 @@
 
 #define RQCRED_SIZE 400 /* This size is excessive */
 
-#define XPRT_DONE_RECV    0x02
-#define XPRT_DONE_GETARGS 0x04
-#define XPRT_DONE_RETURN  0x08
+// XXX #define XPRT_BUSY       0x01
+#define XPRT_DONE_RECV  0x02
+#define XPRT_DONE_READ  0x04
+
+#define XPRT_GETARGS   0x010
+#define XPRT_DISPATCH  0x020
+#define XPRT_REPLY     0x040
+#define XPRT_FREEARGS  0x080
+#define XPRT_WAIT      0x100
+#define XPRT_RETURN    0x200
 
 /*
  * Extension to SVCXPRT structure with additional information and copies
@@ -85,6 +117,8 @@
 
 #define MTXPRT_MAGIC 0x12345  // Dumb
 
+#define MTXPRT_GUARD "MTXPRT_"
+
 typedef SVCXPRT *(*clone_func_t)(SVCXPRT *);
 typedef void (*update_func_t)(SVCXPRT *, SVCXPRT *);
 
@@ -93,18 +127,21 @@ struct mtxprt {
     size_t           mtxp_id;
     pthread_t        mtxp_creator;
     pthread_mutex_t  mtxp_lock;
+    pthread_mutex_t  mtxp_mtready;
+    pthread_mutex_t  mtxp_progress_lock;
     size_t           mtxp_bufsz;
     size_t           mtxp_parent;
     int              mtxp_refcnt;
     int              mtxp_fsck_refcnt;
     int              mtxp_busy;
+    int              mtxp_pad;
     int              mtxp_progress;
-    pthread_mutex_t  mtxp_progress_lock;
     clone_func_t     mtxp_clone;
-    update_func_t    mtxp_update;
+    int              mtxp_stat;
     struct svc_req   mtxp_rqst;
     struct rpc_msg   mtxp_msg;
-    char             mtxp_cred[2 * MAX_AUTH_BYTES + RQCRED_SIZE];
+    char *           mtxp_cred;
+    char             mtxp_guard[8];
 };
  
 typedef struct mtxprt mtxprt_t;
@@ -117,7 +154,7 @@ typedef struct mtxprt mtxprt_t;
  * There are two functions, one that does some extra checking of
  * the validity of the given @type{SVCXPRT}, and one that does no
  * checking.  Most code would use just plain @function{xprt_to_mtxprt},
- * but the no-checking variati0on is used for functions that are
+ * but the no-checking variation is used for functions that are
  * in the middle of constructing (or cloning) a @type{SVCXPRT}
  * or debugging functions that walk the data structures that account
  * for all registered @type{SVCXPRT}s and do so without locking,
@@ -128,3 +165,9 @@ typedef struct mtxprt mtxprt_t;
 extern mtxprt_t *xprt_to_mtxprt(SVCXPRT *xprt);
 extern mtxprt_t *xprt_to_mtxprt_nocheck(SVCXPRT *xprt);
 
+
+#ifdef  __cplusplus
+}
+#endif
+
+#endif /* _SVC_MTXPRT_H */

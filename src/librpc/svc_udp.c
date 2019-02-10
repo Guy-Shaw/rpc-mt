@@ -51,11 +51,6 @@
 #include <sys/uio.h>
 #endif
 
-#ifdef USE_IN_LIBIO
-# include <wchar.h>
-# include <libio/iolibio.h>
-#endif
-
 #include "svc_mtxprt.h"
 #include "svc_debug.h"
 
@@ -69,11 +64,10 @@ extern void xports_global_unlock(void);
 extern SVCXPRT *alloc_xprt(void);
 extern void xprt_lock(SVCXPRT *);
 extern void xprt_unlock(SVCXPRT *);
-extern int  xprt_get_progress(SVCXPRT *);
 extern int  xprt_progress_setbits(SVCXPRT *, int);
 extern int  xprt_progress_clrbits(SVCXPRT *, int);
 extern void xprt_set_busy(SVCXPRT *, int);
-extern int  xprt_is_busy(SVCXPRT *);
+extern void svc_accept_failed(void);
 
 static bool_t svcudp_recv(SVCXPRT *, struct rpc_msg *);
 static bool_t svcudp_reply(SVCXPRT *, struct rpc_msg *);
@@ -154,7 +148,7 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
     }
 
     madesock = FALSE;
-    len = sizeof(struct sockaddr_in);
+    len = sizeof (struct sockaddr_in);
     if (sock == RPC_ANYSOCK) {
         if ((sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
             svc_perror(errno, "svcudp_create: socket creation problem");
@@ -164,16 +158,16 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
         madesock = TRUE;
     }
 
-    bzero((char *)&addr, sizeof(addr));
+    bzero((char *)&addr, sizeof (addr));
     addr.sin_family = AF_INET;
     if (bindresvport(sock, &addr)) {
         addr.sin_port = 0;
-        (void)bind(sock, (struct sockaddr *)&addr, len);
+        (void) bind(sock, (struct sockaddr *)&addr, len);
     }
     if (getsockname(sock, (struct sockaddr *)&addr, &len) != 0) {
         svc_perror(errno, "svcudp_create - cannot getsockname");
         if (madesock)
-            (void)close(sock);
+            (void) close(sock);
         return ((SVCXPRT *)NULL);
     }
     bufsize = ((MAX(sendsz, recvsz) + 3) / 4) * 4;
@@ -197,8 +191,21 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
         abort();
     }
 
+    if (pthread_mutex_init(&(mtxprt->mtxp_progress_lock), NULL) != 0) {
+        abort();
+    }
+
+    if (pthread_mutex_init(&(mtxprt->mtxp_mtready), NULL) != 0) {
+        abort();
+    }
+
+    // Start off locked.  svcudp_getargs() will unlock it.
+    if (pthread_mutex_lock(&(mtxprt->mtxp_mtready)) != 0) {
+        abort();
+    }
+
     /*
-     * Do not use xport_lock(xprt) here.
+     * Do not use xprt_lock(xprt) here.
      * The constructor has not progressed far enough, yet.
      */
     if (pthread_mutex_lock(&(mtxprt->mtxp_lock)) != 0) {
@@ -214,7 +221,7 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
     /*
      * Populate the "standard" SVCXPRT
      */
-    su = (struct svcudp_data *)guard_malloc(sizeof(*su));
+    su = (struct svcudp_data *)guard_malloc(sizeof (*su));
     buf = guard_malloc(bufsize);
 
     su->su_iosz = bufsize;
@@ -236,22 +243,23 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
     mtxprt->mtxp_clone  = svcudp_xprt_clone;
     mtxprt->mtxp_parent = NO_PARENT;
     mtxprt->mtxp_refcnt = 0;
-    if (pthread_mutex_init(&(mtxprt->mtxp_progress_lock), NULL) != 0) {
-        abort();
-    }
     mtxprt->mtxp_progress = 0;
-    xprt_set_busy(xprt, 0);
+    mtxprt->mtxp_busy = 0;
+#ifdef CHECK_CREDENTIALS
+    memset(mtxprt->mtxp_cred, 0, sizeof (mtxprt->mtxp_cred));
+#endif
+    memcpy(mtxprt->mtxp_guard, MTXPRT_GUARD, sizeof (mtxprt->mtxp_guard));
     xprt_unlock(xprt);
 
 #ifdef IP_PKTINFO
-    if ((sizeof(struct iovec) + sizeof(struct msghdr)
-         + sizeof(struct cmsghdr) + sizeof(struct in_pktinfo))
-        > sizeof(xprt->xp_pad)) {
+    if ((sizeof (struct iovec) + sizeof (struct msghdr)
+         + sizeof (struct cmsghdr) + sizeof (struct in_pktinfo))
+        > sizeof (xprt->xp_pad)) {
         (void) eprintf("svcudp_create: xp_pad is too small for IP_PKTINFO\n");
         return (NULL);
     }
     pad = 1;
-    if (setsockopt(sock, SOL_IP, IP_PKTINFO, (void *)&pad, sizeof(pad)) == 0) {
+    if (setsockopt(sock, SOL_IP, IP_PKTINFO, (void *)&pad, sizeof (pad)) == 0) {
         /* Set the padding to all 1s. */
         pad = 0xff;
     } else {
@@ -263,7 +271,7 @@ svcudp_bufcreate(int sock, u_int sendsz, u_int recvsz)
     pad = 0;
 #endif
 
-    memset(&xprt->xp_pad[0], pad, sizeof(xprt->xp_pad));
+    memset(&xprt->xp_pad[0], pad, sizeof (xprt->xp_pad));
 
     xprt_register(xprt);
     return (xprt);
@@ -310,8 +318,21 @@ svcudp_xprt_clone(SVCXPRT *xprt1)
         abort();
     }
 
+    if (pthread_mutex_init(&(mtxprt2->mtxp_progress_lock), NULL) != 0) {
+        abort();
+    }
+
+    if (pthread_mutex_init(&(mtxprt2->mtxp_mtready), NULL) != 0) {
+        abort();
+    }
+
+    // Start off locked.  svcudp_getargs() will unlock it.
+    if (pthread_mutex_lock(&(mtxprt2->mtxp_mtready)) != 0) {
+        abort();
+    }
+
     /*
-     * Do not use xport_lock(xprt2) here.
+     * Do not use xprt_lock(xprt2) here.
      * The constructor has not progressed far enough, yet.
      */
     if (pthread_mutex_lock(&(mtxprt2->mtxp_lock)) != 0) {
@@ -342,17 +363,23 @@ svcudp_xprt_clone(SVCXPRT *xprt1)
     mtxprt2->mtxp_creator = pthread_self();
     mtxprt2->mtxp_parent = mtxprt1->mtxp_id;
     mtxprt2->mtxp_refcnt = 0;
-    if (pthread_mutex_init(&(mtxprt2->mtxp_progress_lock), NULL) != 0) {
-        abort();
-    }
     mtxprt2->mtxp_progress = 0;
-    xprt_set_busy(xprt2, 0);
+    mtxprt2->mtxp_busy = 0;
     rqstp2 = &(mtxprt2->mtxp_rqst);
     msgp2 = &(mtxprt2->mtxp_msg);
+#ifdef CHECK_CREDENTIALS
     rqstp2->rq_clntcred = &(mtxprt2->mtxp_cred[2 * MAX_AUTH_BYTES]);
+#else
+    rqstp2->rq_clntcred = NULL;
+#endif
     rqstp2->rq_xprt = xprt2;
+#ifdef CHECK_CREDENTIALS
     msgp2->rm_call.cb_cred.oa_base = &(mtxprt2->mtxp_cred[0]);
     msgp2->rm_call.cb_verf.oa_base = &(mtxprt2->mtxp_cred[MAX_AUTH_BYTES]);
+#else
+    msgp2->rm_call.cb_cred.oa_base = NULL;
+    msgp2->rm_call.cb_verf.oa_base = NULL;
+#endif
     buf = guard_malloc(bufsize);
     rpc_buffer(xprt2) = (char *)buf;
     xdrmem_create(&(su2->su_xdrs), rpc_buffer(xprt2), su2->su_iosz, XDR_DECODE);
@@ -364,8 +391,8 @@ svcudp_xprt_clone(SVCXPRT *xprt1)
     xdrs2->x_private += (xdrs1->x_private - xdrs1->x_base);
 
 #ifdef IP_PKTINFO
-    mesgp1 = (struct msghdr *)&xprt1->xp_pad[sizeof(struct iovec)];
-    mesgp2 = (struct msghdr *)&xprt2->xp_pad[sizeof(struct iovec)];
+    mesgp1 = (struct msghdr *)&xprt1->xp_pad[sizeof (struct iovec)];
+    mesgp2 = (struct msghdr *)&xprt2->xp_pad[sizeof (struct iovec)];
     if (mesgp2->msg_iovlen) {
         iovp = (struct iovec *)&xprt2->xp_pad[0];
         iovp->iov_base = rpc_buffer(xprt2);
@@ -373,11 +400,11 @@ svcudp_xprt_clone(SVCXPRT *xprt1)
         mesgp2->msg_iov = iovp;
         mesgp2->msg_iovlen = 1;
         mesgp2->msg_name = &(xprt2->xp_raddr);
-        mesgp2->msg_namelen = (socklen_t) sizeof(struct sockaddr_in);
+        mesgp2->msg_namelen = (socklen_t) sizeof (struct sockaddr_in);
         if (mesgp1->msg_control != NULL) {
-            mesgp2->msg_control = &xprt2->xp_pad[sizeof(struct iovec) + sizeof(struct msghdr)];
-            mesgp2->msg_controllen = sizeof(xprt2->xp_pad)
-                - sizeof(struct iovec) - sizeof(struct msghdr);
+            mesgp2->msg_control = &xprt2->xp_pad[sizeof (struct iovec) + sizeof (struct msghdr)];
+            mesgp2->msg_controllen = sizeof (xprt2->xp_pad)
+                - sizeof (struct iovec) - sizeof (struct msghdr);
         }
         else {
             if (!(mesgp2->msg_control == NULL)) {
@@ -415,7 +442,7 @@ svcudp_stat(SVCXPRT *xprt  __attribute__((unused)))
 #ifdef IP_PKTINFO
 
 #define SIMPLE_IP_PKTINFO_SIZE \
-    (sizeof(struct cmsghdr) + sizeof(struct in_pktinfo))
+    (sizeof (struct cmsghdr) + sizeof (struct in_pktinfo))
 
 static inline int
 is_simple_ip_pktinfo(struct msghdr *mesgp, struct cmsghdr *cmsg)
@@ -471,11 +498,11 @@ svcudp_recv_with_id_lock(SVCXPRT *xprt, struct rpc_msg *msg)
 
   again:
     tprintf(2, "@again:\n");
-    len = (socklen_t) sizeof(struct sockaddr_in);
+    len = (socklen_t) sizeof (struct sockaddr_in);
 
 #ifdef IP_PKTINFO
     iovp = (struct iovec *)&xprt->xp_pad[0];
-    mesgp = (struct msghdr *)&xprt->xp_pad[sizeof(struct iovec)];
+    mesgp = (struct msghdr *)&xprt->xp_pad[sizeof (struct iovec)];
     if (mesgp->msg_iovlen) {
         iovp->iov_base = rpc_buffer(xprt);
         iovp->iov_len = su->su_iosz;
@@ -483,9 +510,9 @@ svcudp_recv_with_id_lock(SVCXPRT *xprt, struct rpc_msg *msg)
         mesgp->msg_iovlen = 1;
         mesgp->msg_name = &(xprt->xp_raddr);
         mesgp->msg_namelen = len;
-        mesgp->msg_control = &xprt->xp_pad[sizeof(struct iovec) + sizeof(struct msghdr)];
-        mesgp->msg_controllen = sizeof(xprt->xp_pad)
-            - sizeof(struct iovec) - sizeof(struct msghdr);
+        mesgp->msg_control = &xprt->xp_pad[sizeof (struct iovec) + sizeof (struct msghdr)];
+        mesgp->msg_controllen = sizeof (xprt->xp_pad)
+            - sizeof (struct iovec) - sizeof (struct msghdr);
         rlen = recvmsg(xprt->xp_sock, mesgp, 0);
         if (rlen >= 0) {
             struct cmsghdr *cmsg;
@@ -518,10 +545,16 @@ svcudp_recv_with_id_lock(SVCXPRT *xprt, struct rpc_msg *msg)
 #endif
 
     xprt->xp_addrlen = len;
-    if (rlen == -1 && errno == EINTR)
-        goto again;
-    if ((size_t)rlen < (4 * sizeof(uint32_t)))  /* < 4 32-bit ints? */
+    if (rlen == -1) {
+        if (errno == EINTR) {
+            goto again;
+        }
+        svc_accept_failed();
+    }
+
+    if ((size_t)rlen < (4 * sizeof (uint32_t))) { /* < 4 32-bit ints? */
         return (FALSE);
+    }
     xdrs->x_op = XDR_DECODE;
     XDR_SETPOS(xdrs, 0);
     if (!xdr_callmsg(xdrs, msg))
@@ -534,12 +567,12 @@ svcudp_recv_with_id_lock(SVCXPRT *xprt, struct rpc_msg *msg)
             if (mesgp->msg_iovlen) {
                 iovp->iov_base = reply;
                 iovp->iov_len = replylen;
-                (void)sendmsg(xprt->xp_sock, mesgp, 0);
+                (void) sendmsg(xprt->xp_sock, mesgp, 0);
             } else {
-                (void)sendto(xprt->xp_sock, reply, (int)replylen, 0, (struct sockaddr *)&xprt->xp_raddr, len);
+                (void) sendto(xprt->xp_sock, reply, (int)replylen, 0, (struct sockaddr *)&xprt->xp_raddr, len);
             }
 #else
-            (void)sendto(xprt->xp_sock, reply, (int)replylen, 0, (struct sockaddr *)&xprt->xp_raddr, len);
+            (void) sendto(xprt->xp_sock, reply, (int)replylen, 0, (struct sockaddr *)&xprt->xp_raddr, len);
 #endif
             return (TRUE);
         }
@@ -575,6 +608,7 @@ xprt_sendto(SVCXPRT *xprt, size_t slen)
 static bool_t
 svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
 {
+    extern size_t cnt_reply;
     struct svcudp_data *su;
     XDR *xdrs;
     int err;
@@ -585,6 +619,7 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
     struct msghdr *mesgp;
 #endif
 
+    __sync_fetch_and_add(&cnt_reply, 1);
     xprt_lock(xprt);
     su = su_data(xprt);
     xdrs = select_xprt_xdrs(xprt);
@@ -602,7 +637,7 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
         stat = FALSE;
         slen = (size_t)XDR_GETPOS(xdrs);
 #ifdef IP_PKTINFO
-        mesgp = (struct msghdr *)&xprt->xp_pad[sizeof(struct iovec)];
+        mesgp = (struct msghdr *)&xprt->xp_pad[sizeof (struct iovec)];
         tprintf(2, "mesgp->msg_iovlen = %zu\n", mesgp->msg_iovlen);
         if (mesgp->msg_iovlen) {
             iovp = (struct iovec *)&xprt->xp_pad[0];
@@ -611,7 +646,7 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
             mesgp->msg_iov = iovp;
             mesgp->msg_iovlen = 1;
             mesgp->msg_name = &(xprt->xp_raddr);
-            mesgp->msg_namelen = (socklen_t) sizeof(struct sockaddr_in);
+            mesgp->msg_namelen = (socklen_t) sizeof (struct sockaddr_in);
             tprintf(2, "sendmsg(%d, _, 0)\n", xprt->xp_sock);
             rsent = sendmsg(xprt->xp_sock, mesgp, 0);
         }
@@ -633,6 +668,7 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
                 cache_set(xprt, (u_long)slen);
             }
         }
+        xprt_progress_setbits(xprt, XPRT_REPLY);
     }
 
     xprt_unlock(xprt);
@@ -642,14 +678,23 @@ svcudp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
 static bool_t
 svcudp_getargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
 {
+    mtxprt_t *mtxprt;
+    extern size_t cnt_getargs;
     XDR *xdrs;
     bool_t rv;
 
     tprintf(2, "xprt=%s, args_ptr=%s\n", decode_addr(xprt), decode_addr(args_ptr));
+    mtxprt = xprt_to_mtxprt(xprt);
+    if ((mtxprt->mtxp_progress & XPRT_RETURN) != 0) {
+        return (FALSE);
+    }
+    __sync_fetch_and_add(&cnt_getargs, 1);
     xprt_lock(xprt);
     xdrs = select_xprt_xdrs(xprt);
     rv = (*xdr_args) (xdrs, args_ptr);
-    xprt_progress_setbits(xprt, XPRT_DONE_GETARGS);
+    xprt_progress_setbits(xprt, XPRT_GETARGS);
+    xprt_set_busy(xprt, 1);
+    pthread_mutex_unlock(&mtxprt->mtxp_mtready);
     xprt_unlock(xprt);
     return (rv);
 }
@@ -657,13 +702,17 @@ svcudp_getargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
 static bool_t
 svcudp_freeargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
 {
+    extern size_t cnt_freeargs;
     XDR *xdrs;
     bool_t rv;
 
+    tprintf(2, "xprt=%s, args_ptr=%s\n", decode_addr(xprt), decode_addr(args_ptr));
+    __sync_fetch_and_add(&cnt_freeargs, 1);
     xprt_lock(xprt);
     xdrs = select_xprt_xdrs(xprt);
     xdrs->x_op = XDR_FREE;
     rv = (*xdr_args) (xdrs, args_ptr);
+    xprt_progress_setbits(xprt, XPRT_FREEARGS);
     xprt_unlock(xprt);
     return (rv);
 }
@@ -694,7 +743,7 @@ svcudp_destroy(SVCXPRT *xprt)
         err = errno;
         if (rv == 0) {
             tprintf(2, "close(sock=%d)\n", sock);
-            (void)close(sock);
+            (void) close(sock);
         }
         else if (err == EBADF) {
             tprintf(2, "sock=%d -- already closed.\n", sock);
@@ -710,11 +759,24 @@ svcudp_destroy(SVCXPRT *xprt)
             sock, err, esymbuf, ep);
         }
     }
+
+    /*
+     * Conditionally free some elements of |xprt|,
+     * because, svc_return() could be called at a time when
+     * not all data has been filled in.
+     */
     su = su_data(xprt);
-    xdrs = &(su->su_xdrs);
-    XDR_DESTROY(xdrs);
-    free(rpc_buffer(xprt));
-    free(su);
+    if (su != NULL) {
+        xdrs = &(su->su_xdrs);
+        if (xdrs != NULL) {
+            XDR_DESTROY(xdrs);
+        }
+        caddr_t buf = rpc_buffer(xprt);
+        if (buf != NULL) {
+            free(buf);
+        }
+        free(su);
+    }
     xprt_unlock(xprt);
 
     xports_global_lock();
@@ -724,7 +786,7 @@ svcudp_destroy(SVCXPRT *xprt)
 }
 
 
-/*********** this could be a separate file *********************/
+/* ========= this could be a separate file =================== */
 
 /*
  * Fifo cache for udp server
@@ -738,10 +800,10 @@ svcudp_destroy(SVCXPRT *xprt)
     (void) eprintf("%s\n", msg)
 
 #define ALLOC(type, size)       \
-    (type *) malloc((size_t) (sizeof(type) * (size)))
+    (type *) malloc((size_t) (sizeof (type) * (size)))
 
 #define CALLOC(type, size)      \
-    (type *) calloc (sizeof (type), size)
+    (type *) calloc(sizeof (type), size)
 
 /*
  * An entry in the cache
@@ -894,7 +956,7 @@ cache_set(SVCXPRT *xprt, u_long replylen)
     uc->uc_nextvictim %= uc->uc_size;
 }
 
-#define EQADDR(a1, a2) (memcmp((char*)&a1, (char*)&a2, sizeof(a1)) == 0)
+#define EQADDR(a1, a2) (memcmp((char *)&a1, (char *)&a2, sizeof (a1)) == 0)
 
 static inline int
 cache_match(cache_ptr ent, struct svcudp_data *su, struct udp_cache *uc)
@@ -939,6 +1001,6 @@ cache_get(SVCXPRT *xprt, struct rpc_msg *msg, char **replyp, u_long *replylenp)
     uc->uc_proc = msg->rm_call.cb_proc;
     uc->uc_vers = msg->rm_call.cb_vers;
     uc->uc_prog = msg->rm_call.cb_prog;
-    memcpy(&uc->uc_addr, &xprt->xp_raddr, sizeof(uc->uc_addr));
+    memcpy(&uc->uc_addr, &xprt->xp_raddr, sizeof (uc->uc_addr));
     return (0);
 }

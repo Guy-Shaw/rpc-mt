@@ -43,8 +43,10 @@
  *
  */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <string.h>
 #include <libintl.h>
 #include <rpc/rpc.h>
@@ -54,13 +56,9 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-#ifdef USE_IN_LIBIO
-# include <wchar.h>
-# include <libio/iolibio.h>
-#endif
-
 #include "svc_mtxprt.h"
 #include "svc_debug.h"
+#include "svc_tcp_impl.h"
 
 #define UNUSED(x) (void)(x)
 
@@ -69,26 +67,31 @@ extern void xports_global_unlock(void);
 extern SVCXPRT *alloc_xprt(void);
 extern void xprt_lock(SVCXPRT *);
 extern void xprt_unlock(SVCXPRT *);
-extern int  xprt_get_progress(SVCXPRT *);
 extern int  xprt_progress_setbits(SVCXPRT *, int);
 extern int  xprt_progress_clrbits(SVCXPRT *, int);
 extern void xprt_set_busy(SVCXPRT *, int);
-extern int  xprt_is_busy(SVCXPRT *);
 
 extern void svc_perror(int, const char *);
+extern void svc_accept_failed(void);
 
 extern int failfast;
+extern int wait_method_tcp;
 
 extern pthread_mutex_t io_lock;
+extern pthread_mutex_t poll_lock;
+
+extern struct fd_region socket_fd_region;
 
 static inline void
 xdr_enter(void)
 {
+    // XXX pthread_mutex_lock(&poll_lock);
 }
 
 static inline void
 xdr_exit(void)
 {
+    // XXX pthread_mutex_unlock(&poll_lock);
 }
 
 /*
@@ -201,10 +204,10 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
     }
 #endif /* DEBUG_BUFSIZE_8K */
 
-    tprintf(2, "sock=%d, sendsize=%u, recvsize=%u, sock.fd=%d\n",
-        sock, sendsize, recvsize, sock);
+    tprintf(2, "sock=%d, sendsize=%u, recvsize=%u\n",
+        sock, sendsize, recvsize);
     madesock = FALSE;
-    len = sizeof(struct sockaddr_in);
+    len = sizeof (struct sockaddr_in);
 
     if (sock == RPC_ANYSOCK) {
         sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -215,11 +218,11 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
         }
         madesock = TRUE;
     }
-    bzero((char *)&addr, sizeof(addr));
+    bzero((char *)&addr, sizeof (addr));
     addr.sin_family = AF_INET;
     if (bindresvport(sock, &addr)) {
         addr.sin_port = 0;
-        (void)bind(sock, (struct sockaddr *)&addr, len);
+        (void) bind(sock, (struct sockaddr *)&addr, len);
     }
 
     ret = getsockname(sock, (struct sockaddr *)&addr, &len);
@@ -227,8 +230,7 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
         err = errno;
         svc_perror(err, "svc_tcp.c - getsockname(...) failed");
     }
-
-    if (ret == 0) {
+    else {
         ret = listen(sock, SOMAXCONN);
         if (ret != 0) {
             err = errno;
@@ -238,7 +240,7 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
 
     if (ret != 0) {
         if (madesock) {
-            (void)close(sock);
+            (void) close(sock);
         }
         return ((SVCXPRT *)NULL);
     }
@@ -263,8 +265,21 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
         abort();
     }
 
+    if (pthread_mutex_init(&(mtxprt->mtxp_progress_lock), NULL) != 0) {
+        abort();
+    }
+
+    if (pthread_mutex_init(&(mtxprt->mtxp_mtready), NULL) != 0) {
+        abort();
+    }
+
+    // Start off locked.  svctcp_getargs() will unlock it.
+    if (pthread_mutex_lock(&(mtxprt->mtxp_mtready)) != 0) {
+        abort();
+    }
+
     /*
-     * Do not use xport_lock(xprt) here.
+     * Do not use xprt_lock(xprt) here.
      * The constructor has not progressed far enough, yet.
      */
     if (pthread_mutex_lock(&(mtxprt->mtxp_lock)) != 0) {
@@ -279,6 +294,8 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
 
     r->sendsize = sendsize;
     r->recvsize = recvsize;
+    mtxprt->mtxp_progress = 0;
+    mtxprt->mtxp_busy = 0;
     xprt->xp_p2 = NULL;
     xprt->xp_p1 = (caddr_t)r;
     xprt->xp_verf = _null_auth;
@@ -287,15 +304,14 @@ svctcp_create_with_lock(int sock, u_int sendsize, u_int recvsize)
     xprt->xp_sock = sock;
 
     mtxprt->mtxp_creator = pthread_self();
-    mtxprt->mtxp_id = -1;
+    mtxprt->mtxp_id = XPRT_ID_INVALID;
     mtxprt->mtxp_clone  = NULL;
     mtxprt->mtxp_parent = NO_PARENT;
     mtxprt->mtxp_refcnt = 0;
-    if (pthread_mutex_init(&(mtxprt->mtxp_progress_lock), NULL) != 0) {
-        abort();
-    }
-    mtxprt->mtxp_progress = 0;
-    xprt_set_busy(xprt, 0);
+#ifdef CHECK_CREDENTIALS
+    memset(mtxprt->mtxp_cred, 0, sizeof (mtxprt->mtxp_cred));
+#endif
+    memcpy(mtxprt->mtxp_guard, MTXPRT_GUARD, sizeof (mtxprt->mtxp_guard));
     xprt_unlock(xprt);
     xprt_register(xprt);
     return (xprt);
@@ -330,14 +346,14 @@ makefd_xprt_with_lock(int fd, u_int sendsize, u_int recvsize)
 
     tprintf(2, "fd=%d, sendsize=%u, recvsize=%u\n", fd, sendsize, recvsize);
     xprt = alloc_xprt();
-    cd = (struct tcp_conn *)guard_malloc(sizeof(struct tcp_conn));
+    cd = (struct tcp_conn *)guard_malloc(sizeof (struct tcp_conn));
     cd->strm_stat = XPRT_IDLE;
     xdrrec_create(&(cd->xdrs), sendsize, recvsize, (caddr_t)xprt, readtcp, writetcp);
 
     /*
      * Constructor for @type{SVCXPRT}, including the additional @type{mtxprt_t}
      * Order of construction is important.
-     * We want to create a lock for each SVCXPRT.
+     * We want to create a lock for each @type{SVCXPRT}.
      * The rest of the contructor should all be done while the lock is held.
      * Even if it is not _really_ necessary, it will keep Valgrind/Helgrind
      * happy.  And they are our friends.
@@ -351,14 +367,28 @@ makefd_xprt_with_lock(int fd, u_int sendsize, u_int recvsize)
         abort();
     }
 
+    if (pthread_mutex_init(&(mtxprt->mtxp_progress_lock), NULL) != 0) {
+        abort();
+    }
+
+    if (pthread_mutex_init(&(mtxprt->mtxp_mtready), NULL) != 0) {
+        abort();
+    }
+
+    // Start off locked.  svctcp_getargs() will unlock it.
+    if (pthread_mutex_lock(&(mtxprt->mtxp_mtready)) != 0) {
+        abort();
+    }
+
     /*
-     * Do not use xport_lock(xprt) here.
+     * Do not use xprt_lock(xprt) here.
      * The constructor has not progressed far enough, yet.
      */
     if (pthread_mutex_lock(&(mtxprt->mtxp_lock)) != 0) {
         abort();
     }
     mtxprt->mtxp_progress = 0;
+    mtxprt->mtxp_busy = 0;
     xprt->xp_p2 = NULL;
     xprt->xp_p1 = (caddr_t)cd;
     xprt->xp_verf.oa_base = cd->verf_body;
@@ -367,20 +397,26 @@ makefd_xprt_with_lock(int fd, u_int sendsize, u_int recvsize)
     xprt->xp_port = 0;          /* this is a connection, not a rendezvouser */
     xprt->xp_sock = fd;
 
+#if 0
+    XDR *xdrs;
+    xdrs = &(cd->xdrs);
+    xdrs->x_op = XDR_DECODE;
+#endif
+
     /*
      * Set "magic", right away.
      * Other functions validate it.  Keep them happy.
      */
     mtxprt->mtxp_magic = MTXPRT_MAGIC;
     mtxprt->mtxp_creator = pthread_self();
-    mtxprt->mtxp_id = -1;
+    mtxprt->mtxp_id = XPRT_ID_INVALID;
     mtxprt->mtxp_clone  = NULL;
     mtxprt->mtxp_parent = NO_PARENT;
     mtxprt->mtxp_refcnt = 0;
-    if (pthread_mutex_init(&(mtxprt->mtxp_progress_lock), NULL) != 0) {
-        abort();
-    }
-    xprt_set_busy(xprt, 0);
+#ifdef CHECK_CREDENTIALS
+    memset(mtxprt->mtxp_cred, 0, sizeof (mtxprt->mtxp_cred));
+#endif
+    memcpy(mtxprt->mtxp_guard, MTXPRT_GUARD, sizeof (mtxprt->mtxp_guard));
     xprt_unlock(xprt);
     xprt_register(xprt);
     return (xprt);
@@ -395,9 +431,60 @@ makefd_xprt(int fd, u_int sendsize, u_int recvsize)
     return (xprt);
 }
 
+
+static bool
+fd_is_open(int fd)
+{
+    return (fcntl(fd, F_GETFD) != -1 || errno != EBADF);
+}
+
+static int
+move_fd(int fd)
+{
+    int new_fd;
+    int end_fd;
+
+    if (socket_fd_region.order == 0) {
+        return (fd);
+    }
+
+    // Start with lowest or highest number in range
+    if (socket_fd_region.order == 1) {
+        new_fd = socket_fd_region.lo;
+        end_fd = socket_fd_region.hi;
+    }
+    else {
+        new_fd = socket_fd_region.hi;
+        end_fd = socket_fd_region.lo;
+    }
+
+    while (true) {
+        if (!fd_is_open(new_fd)) {
+            int dup_fd;
+            dup_fd = fcntl(fd, F_DUPFD, new_fd);
+            if (dup_fd == new_fd) {
+                close(fd);
+                return (dup_fd);
+            }
+        }
+        new_fd += socket_fd_region.order;
+        if (new_fd * socket_fd_region.order > end_fd * socket_fd_region.order) {
+            teprintf("Ran out of file descriptors in range %d..%d\n",
+                    socket_fd_region.lo, socket_fd_region.hi);
+            if (opt_svc_trace) {
+                show_xports();
+            }
+            svc_die();
+        }
+    }
+
+    return (-1);
+}
+
 static bool_t
 rendezvous_request(SVCXPRT *xprt, struct rpc_msg *errmsg)
 {
+    int accept_sock;
     int sock;
     struct tcp_rendezvous *r;
     struct sockaddr_in addr;
@@ -407,21 +494,33 @@ rendezvous_request(SVCXPRT *xprt, struct rpc_msg *errmsg)
     UNUSED(errmsg);
     r = (struct tcp_rendezvous *)xprt->xp_p1;
 
+    pthread_mutex_lock(&poll_lock);
   again:
-    len = sizeof(struct sockaddr_in);
-    sock = accept(xprt->xp_sock, (struct sockaddr *)&addr, &len);
+    len = sizeof (struct sockaddr_in);
+    accept_sock = sys_accept(xprt->xp_sock, (struct sockaddr *)&addr, &len);
     err = errno;
-    tprintf(2, "accept() => %d\n", sock);
-    if (sock < 0) {
-        if (err == EINTR)
+    tprintf(2, "accept(%d) => %d\n", xprt->xp_sock, accept_sock);
+    if (accept_sock < 0) {
+        if (err == EINTR) {
             goto again;
+        }
+        pthread_mutex_unlock(&poll_lock);
+        svc_accept_failed();
         return (FALSE);
     }
+
+    sock = move_fd(accept_sock);
+    pthread_mutex_unlock(&poll_lock);
+
+    if (sock != accept_sock) {
+        tprintf(2, "move_fd(%d) => %d\n", accept_sock, sock);
+    }
+
     /*
      * Make a new transporter (re-uses xprt)
      */
     xprt = makefd_xprt(sock, r->sendsize, r->recvsize);
-    memcpy(&xprt->xp_raddr, &addr, sizeof(addr));
+    memcpy(&xprt->xp_raddr, &addr, sizeof (addr));
     xprt->xp_addrlen = len;
     return (FALSE);             /* There is never an rpc msg to be processed */
 }
@@ -438,6 +537,7 @@ svctcp_destroy(SVCXPRT *xprt)
     mtxprt_t *mtxprt;
     int sock;
 
+    xprt_set_busy(xprt, 1);
     xprt_lock(xprt);
     mtxprt = xprt_to_mtxprt(xprt);
     sock = xprt->xp_sock;
@@ -460,7 +560,7 @@ svctcp_destroy(SVCXPRT *xprt)
         err = errno;
         if (rv == 0) {
             tprintf(2, "close(sock.fd=%d)\n", sock);
-            (void)close(sock);
+            (void) close(sock);
         }
         else if (err == EBADF) {
             tprintf(2, "sock=%d -- already closed.\n", sock);
@@ -486,21 +586,28 @@ svctcp_destroy(SVCXPRT *xprt)
         struct tcp_conn *cd;
 
         tprintf(2, "Socket type(%d): connection\n", sock);
-        cd = (struct tcp_conn *)xprt->xp_p1;
-        XDR_DESTROY(&(cd->xdrs));
+        if (xprt->xp_p1 != NULL) {
+            cd = (struct tcp_conn *)xprt->xp_p1;
+            if (cd != NULL) {
+                XDR_DESTROY(&(cd->xdrs));
+            }
+        }
     }
-    free(xprt->xp_p1);
+
+    if (xprt->xp_p1 != NULL) {
+        free(xprt->xp_p1);
+    }
     xprt_unlock(xprt);
 
     xports_global_lock();
     xprt_unregister(xprt);
-    xports_global_unlock();
     free(xprt);
+    xports_global_unlock();
 }
 
 /*
- * reads data from the tcp connection.
- * any error is fatal and the connection is closed.
+ * Reads data from the tcp connection.
+ * Any error is fatal and the connection is closed.
  * (And a read of zero bytes is a half closed stream => error.)
  */
 static int
@@ -520,14 +627,14 @@ readtcp_with_lock(char *xprtptr, char *buf, int ilen)
     xprt = (SVCXPRT *)xprtptr;
     sock = xprt->xp_sock;
     milliseconds = 35 * 1000;
-    if (opt_svc_trace) {
-        tprintf(2, "xprt=%s, sock.fd=%d, ilen=%d\n        peer=%s\n",
-            decode_addr(xprt), sock, ilen, decode_inet_peer(sock));
-    }
+    tprintf(2, "xprt=%s, sock.fd=%d, ilen=%d\n        peer=%s\n",
+        decode_addr(xprt), sock, ilen, decode_inet_peer(sock));
 
     do {
         pollfd.fd = sock;
         pollfd.events = POLLIN;
+        tprintf(2, "poll(fd=%d)\n", sock);
+        xprt_set_busy(xprt, 1);
         rv = poll(&pollfd, 1, milliseconds);
         switch (rv) {
         case -1:
@@ -551,11 +658,13 @@ readtcp_with_lock(char *xprtptr, char *buf, int ilen)
     } while ((pollfd.revents & POLLIN) == 0);
 
     len = (size_t)ilen;
-    rdlen = read(sock, buf, len);
+    rdlen = sys_read(sock, buf, len);
     err = errno;
     tprintf(2, "read(sock.fd=%d, %s, %zu) => %zd\n",
         sock, decode_addr(buf), len, rdlen);
     if (rdlen > 0) {
+        xprt_progress_setbits(xprt, XPRT_DONE_READ);
+        xprt_set_busy(xprt, 0);
         return (ssize_to_int(rdlen));
     }
 
@@ -564,11 +673,17 @@ readtcp_with_lock(char *xprtptr, char *buf, int ilen)
     }
 
   fatal_err:
+    // XXX xprt_set_busy(xprt, 0);
+    xprt_set_busy(xprt, 1);
     ((struct tcp_conn *)(xprt->xp_p1))->strm_stat = XPRT_DIED;
     return (-1);
 }
 
+#if 1
+#define tcp_lock poll_lock
+#else
 pthread_mutex_t tcp_lock = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 static int
 readtcp(char *xprtptr, char *buf, int len)
@@ -594,18 +709,20 @@ writetcp(char *xprtptr, char *buf, int len)
     int wlen;
 
     xprt = (SVCXPRT *)xprtptr;
+    // XXX xprt_set_busy(xprt, 1);
     sock = xprt->xp_sock;
     tprintf(2, "xprt=%s, sock=%d\n", decode_addr(xprt), sock);
-    pthread_mutex_lock(&tcp_lock);
+    // pthread_mutex_lock(&tcp_lock);
     for (cnt = len; cnt > 0; cnt -= wlen, buf += wlen) {
-        wlen = write(sock, buf, cnt);
+        wlen = sys_write(sock, buf, cnt);
         if (wlen < 0) {
             ((struct tcp_conn *)(xprt->xp_p1))->strm_stat = XPRT_DIED;
             len = -1;
             break;
         }
     }
-    pthread_mutex_unlock(&tcp_lock);
+    // pthread_mutex_unlock(&tcp_lock);
+    // XXX xprt_set_busy(xprt, 0);
     return (len);
 }
 
@@ -640,19 +757,23 @@ svctcp_stat(SVCXPRT *xprt)
 static bool_t
 svctcp_recv(SVCXPRT *xprt, struct rpc_msg *msg)
 {
+    mtxprt_t *mtxprt;
+    size_t id;
     struct tcp_conn *cd;
     XDR *xdrs;
     int rv;
 
-    tprintf(2, "xprt=%s, msg=%s, fd=%d\n",
-        decode_addr(xprt), decode_addr(msg), xprt->xp_sock);
+    mtxprt = xprt_to_mtxprt(xprt);
+    id = mtxprt->mtxp_id;
+    tprintf(2, "xprt=%s, id=%zu, msg=%s, fd=%d\n",
+        decode_addr(xprt), id, decode_addr(msg), xprt->xp_sock);
+    xprt_lock(xprt);
     xprt_progress_clrbits(xprt, XPRT_DONE_RECV);
     xdr_enter();
-    xprt_lock(xprt);
     cd = (struct tcp_conn *)(xprt->xp_p1);
     xdrs = &(cd->xdrs);
     xdrs->x_op = XDR_DECODE;
-    (void)xdrrec_skiprecord(xdrs);
+    (void) xdrrec_skiprecord(xdrs);
     if (xdr_callmsg(xdrs, msg)) {
         cd->x_id = msg->rm_xid;
         rv = TRUE;
@@ -661,8 +782,9 @@ svctcp_recv(SVCXPRT *xprt, struct rpc_msg *msg)
         cd->strm_stat = XPRT_DIED;
         rv = FALSE;
     }
-    xprt_unlock(xprt);
     xdr_exit();
+
+#define CONFIG_DIE_ON_RECV_FAILURE 1
 
 #ifdef CONFIG_DIE_ON_RECV_FAILURE
 
@@ -672,41 +794,43 @@ svctcp_recv(SVCXPRT *xprt, struct rpc_msg *msg)
         if (opt_svc_trace) {
             show_xports();
         }
+        xprt_unlock(xprt);
         svc_die();
     }
 
 #endif /* CONFIG_DIE_ON_RECV_FAILURE */
 
     xprt_progress_setbits(xprt, XPRT_DONE_RECV);
+    xprt_unlock(xprt);
     return (rv);
 }
 
 static bool_t
 svctcp_getargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
 {
+    // extern pthread_mutex_t getargs_lock;
+    extern size_t cnt_getargs;
     struct tcp_conn *cd;
     XDR *xdrs;
     bool_t rv;
 
+    __sync_fetch_and_add(&cnt_getargs, 1);
     tprintf(2, "xprt=%s, args_ptr=%s, fd=%d\n",
         decode_addr(xprt), decode_addr(args_ptr), xprt->xp_sock);
 
-#ifdef CONFIG_WAIT_FOR_RECV
-    while ((xprt_get_progress(xprt) & XPRT_DONE_RECV) == 0) {
-        const struct timespec ms = { 0, 1000000 };
-        nanosleep(&ms, NULL);
-    }
-#endif /* CONFIG_WAIT_FOR_RECV */
+    pthread_mutex_lock(&poll_lock);
+    xprt_set_busy(xprt, 1);
+    xprt_lock(xprt);
 
     xdr_enter();
-    xprt_lock(xprt);
     cd = (struct tcp_conn *)(xprt->xp_p1);
     xdrs = &(cd->xdrs);
     xdrs->x_op = XDR_DECODE;
     rv = (*xdr_args) (xdrs, args_ptr);
     tprintf(2, "rv = %d\n", rv);
-    xprt_unlock(xprt);
     xdr_exit();
+    xprt_set_busy(xprt, 0);
+    pthread_mutex_unlock(&poll_lock);
 
     if (failfast && rv == 0) {
         // Die quickly in case of error.
@@ -714,58 +838,79 @@ svctcp_getargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
         if (opt_svc_trace) {
             show_xports();
         }
+        xprt_unlock(xprt);
         svc_die();
     }
 
-    xprt_progress_setbits(xprt, XPRT_DONE_GETARGS);
+    xprt_progress_setbits(xprt, XPRT_GETARGS);
+    mtxprt_t *mtxprt;
+    mtxprt = xprt_to_mtxprt(xprt);
+    if (wait_method_tcp == 1) {
+        xprt_set_busy(xprt, 1);
+    }
+    else {
+        pthread_mutex_unlock(&mtxprt->mtxp_mtready);
+    }
+    xprt_unlock(xprt);
     return (rv);
 }
 
 static bool_t
 svctcp_freeargs(SVCXPRT *xprt, xdrproc_t xdr_args, caddr_t args_ptr)
 {
+    extern size_t cnt_freeargs;
     struct tcp_conn *cd;
     XDR *xdrs;
     bool_t rv;
 
     tprintf(2, "xprt=%s, args_ptr=%s, fd=%d\n",
         decode_addr(xprt), decode_addr(args_ptr), xprt->xp_sock);
-    xdr_enter();
+    __sync_fetch_and_add(&cnt_freeargs, 1);
     xprt_lock(xprt);
+    pthread_mutex_lock(&poll_lock);
+    xdr_enter();
     cd = (struct tcp_conn *)(xprt->xp_p1);
     xdrs = &(cd->xdrs);
     xdrs->x_op = XDR_FREE;
     rv = ((*xdr_args) (xdrs, args_ptr));
-    xprt_unlock(xprt);
     xdr_exit();
+    pthread_mutex_unlock(&poll_lock);
 
     if (failfast && rv == 0) {
         // Die quickly in case of error.
         show_xports();
+        xprt_unlock(xprt);
         svc_die();
     }
 
+    xprt_progress_setbits(xprt, XPRT_FREEARGS);
+    xprt_unlock(xprt);
     return (rv);
 }
 
 static bool_t
 svctcp_reply(SVCXPRT *xprt, struct rpc_msg *msg)
 {
+    extern size_t cnt_reply;
     struct tcp_conn *cd;
     XDR *xdrs;
     bool_t stat;
 
     tprintf(2, "xprt=%s, msg=%s, fd=%d\n",
         decode_addr(xprt), decode_addr(msg), xprt->xp_sock);
-    xdr_enter();
+    __sync_fetch_and_add(&cnt_reply, 1);
     xprt_lock(xprt);
+    pthread_mutex_lock(&poll_lock);
+    xdr_enter();
     cd = (struct tcp_conn *)(xprt->xp_p1);
     xdrs = &(cd->xdrs);
     xdrs->x_op = XDR_ENCODE;
     msg->rm_xid = cd->x_id;
     stat = xdr_replymsg(xdrs, msg);
-    (void)xdrrec_endofrecord(xdrs, TRUE);
-    xprt_unlock(xprt);
+    (void) xdrrec_endofrecord(xdrs, TRUE);
     xdr_exit();
+    pthread_mutex_unlock(&poll_lock);
+    xprt_progress_setbits(xprt, XPRT_REPLY);
+    xprt_unlock(xprt);
     return (stat);
 }

@@ -41,18 +41,17 @@ struct sockaddr;
 char *
 decode_inet_ipv4_addr_r(char *buf, size_t bufsz, struct sockaddr *addr)
 {
-    struct sockaddr_in *ipv4_addr;
-    char *addr_str;
-
-    addr_str = NULL;
     if (addr) {
+        struct sockaddr_in *ipv4_addr;
+        char *addr_str;
+
         ipv4_addr = (struct sockaddr_in *)addr;
+        addr_str = inet_ntoa(ipv4_addr->sin_addr);
+        (void) append_buf(buf, bufsz, buf, addr_str);
     }
-    addr_str = inet_ntoa(ipv4_addr->sin_addr);
-    if (addr_str == NULL) {
-        addr_str = "<NULL>";
+    else {
+        (void) append_buf(buf, bufsz, buf, "<NULL>");
     }
 
-    (void)append_buf(buf, bufsz, buf, addr_str);
     return (buf);
 }

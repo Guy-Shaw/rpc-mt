@@ -1,0 +1,57 @@
+CC := gcc
+
+GFLAGS := -g -ggdb -g3 -finstrument-functions
+CPP_INCS := -I../inc -I.
+CPP_DEFS := -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC -D_RPC_THREAD_SAFE_
+CPP_FLAGS := $(CPP_INCS) $(CPP_DEFS)
+CFLAGS := $(GFLAGS) $(CPP_FLAGS) -Wall -Wextra -pthread -fPIC
+
+SRC_C := $(sort $(wildcard *.c))
+SRC_I := $(SRC_C:%.c=%.i)
+SRC_M := $(SRC_C:%.c=%.m)
+OBJ   := $(SRC_C:%.c=%.o)
+
+.PHONY: all dev ifiles clean
+
+all: $(OBJ)
+
+ifiles: $(SRC_I)
+%.i: %.c
+	$(CC) -E $(CFLAGS) $< -o $@
+
+mfiles: $(SRC_M)
+%.m: %.c
+	$(CC) -M $(CFLAGS) $< -o $@
+
+hfiles: $(SRC_C:%.c=%.H)
+%.H: %.c
+	$(CC) -H -c $(CFLAGS) $< >$@ 2>&1
+
+Dfiles: $(SRC_C:%.c=%.D)
+%.D: %.c
+	$(CC) -dU -E $(CPP_FLAGS) $< 2>&1 | ./bin/cpp-defs >$@
+
+mcc:
+	mcc --mcc:header $(CFLAGS) -c -- $(SRC_C)
+
+mcc1:
+	mcc --mcc:header $(CFLAGS) -c -- $(CFILE)
+
+clean:
+	rm -f cscope.files cscope.out cscope.in.out cscope.po.out tags
+	rm -f *.o *.i *.m *.H *.D
+
+distclean: clean
+	rm -f Makefile config.status config.log configure.ac
+
+show:
+	@echo 'SRC_C =' $(SRC_C)
+	@echo 'SRC_I =' $(SRC_I)
+	@echo 'SRC_M =' $(SRC_M)
+	@echo 'OBJ   =' $(OBJ)
+	@echo
+	@echo 'GFLAGS    =' $(GFLAGS)
+	@echo 'CPP_INCS  =' $(CPP_INCS)
+	@echo 'CPP_DEFS  =' $(CPP_DEFS)
+	@echo 'CPP_FLAGS =' $(CPP_FLAGS)
+	@echo 'CFLAGS    =' $(CFLAGS)

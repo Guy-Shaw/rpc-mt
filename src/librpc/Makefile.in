@@ -1,6 +1,6 @@
 CC := @CC@
 
-GFLAGS := -g -ggdb -g3
+GFLAGS := -g -ggdb -g3 -finstrument-functions
 CPP_INCS := -I../inc
 CPP_DEFS := -DPIC -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -D__USE_MISC -D_RPC_THREAD_SAFE_
 CPP_FLAGS := $(CPP_INCS) $(CPP_DEFS)
@@ -36,6 +36,8 @@ Dfiles: $(SRC_C:%.c=%.D)
 mcc:
 	mcc --mcc:header $(CFLAGS) -c -- $(SRC_C)
 
+mcc1:
+	mcc --mcc:header $(CFLAGS) -c -- $(CFILE)
 
 $(OBJ): svc_mtxprt.h svc_debug.h
 

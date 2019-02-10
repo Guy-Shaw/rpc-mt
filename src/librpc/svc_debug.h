@@ -32,6 +32,8 @@ extern "C" {
 #include <pthread.h>            // Needed for tprintf(), teprintf()
 #include <assert.h>
 #include <execinfo.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 
 #include <decode-impl.h>
 
@@ -43,6 +45,7 @@ extern pthread_mutex_t trace_lock;
         fflush(stderr); \
         fprintf(stderr, fmt, ## __VA_ARGS__); \
         fflush(stderr); \
+        dbuf_thread_reset(); \
     })
 
 #define eprintf(fmt, ...) \
@@ -60,6 +63,7 @@ extern pthread_mutex_t trace_lock;
             (uintptr_t)pthread_self(), __FILE__, __LINE__, __FUNCTION__, \
             ## __VA_ARGS__); \
         fflush(stderr); \
+        dbuf_thread_reset(); \
     })
 
 #define trace_printf(fmt, ...) \
@@ -77,6 +81,7 @@ extern pthread_mutex_t trace_lock;
             (uintptr_t)pthread_self(), __FILE__, __LINE__, __FUNCTION__, \
             ## __VA_ARGS__); \
         fflush(stderr); \
+        dbuf_thread_reset(); \
     })
 
 #define teprintf(fmt, ...) \
@@ -94,11 +99,19 @@ extern pthread_mutex_t trace_lock;
 extern void show_xports(void);
 extern void svc_trace(unsigned int lvl);
 extern void svc_die(void);
+extern void uftrace_start(void);
+extern void uftrace_end(void);
 extern void svc_perror(int err, const char *s);
 
 extern unsigned int opt_svc_trace;
 
 extern int ssize_to_int(ssize_t ssz);
+
+extern ssize_t sys_read(int fd, void *buf, size_t count);
+extern ssize_t sys_write(int fd, const void *buf, size_t count);
+extern int sys_accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+
+extern void fhexdump(FILE *f, size_t align, size_t indent, const void *buf, size_t count);
 
 #ifdef  __cplusplus
 }

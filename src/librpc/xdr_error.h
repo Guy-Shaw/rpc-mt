@@ -1,7 +1,7 @@
 /*
- * Filename: svc_debug.c
+ * Filename: xdr_error.h
  * Project: rpc-mt
- * Brief: Support for debugging / trace messages specific to svc
+ * Brief: Error handling functions specific to XDR
  *
  * Copyright (C) 2016 Guy Shaw
  * Written by Guy Shaw <gshaw@acm.org>
@@ -20,34 +20,25 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <inttypes.h>
-#include <string.h>
-#include <unistd.h>             // Import sleep()
-#include <assert.h>
+#ifndef _XDR_ERROR_H
+#define _XDR_ERROR_H 1
 
-#include "svc_debug.h"
+#ifdef  __cplusplus
+extern "C" {
+#endif
 
-// Trace level from 0..9
 
-unsigned int opt_svc_trace = 0;
+// extern pthread_mutex_t trace_lock;
 
-void
-svc_trace(unsigned int lvl)
-{
-    opt_svc_trace = lvl;
+
+extern int xdr_failfast;
+
+extern void xdr_bad_op(const char *filename, const char *function, int op);
+extern void xdr_overflow(const char *filename, const char *function);
+extern void xdr_out_of_memory(const char *filename, const char *function);
+
+#ifdef  __cplusplus
 }
+#endif
 
-void
-svc_die()
-{
-    fflush(stdout);
-    fflush(stderr);
-    sleep(1);
-    fflush(stdout);
-    fflush(stderr);
-    teprintf("\n");
-    abort();
-}
+#endif /* _XDR_ERROR_H */
