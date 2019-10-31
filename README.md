@@ -87,7 +87,7 @@ as Sun cstyle, but with certain changes.
 
 They are:
 
-  1. spaces insteaed of tabs;
+  1. spaces instead of tabs;
   2. 4 character indent, instead of 8;
   3. no cuddling of braces.
 
